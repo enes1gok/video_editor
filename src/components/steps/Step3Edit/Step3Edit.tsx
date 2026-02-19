@@ -2,7 +2,7 @@ import React, { useRef, useState, useCallback, useEffect, useMemo } from 'react'
 import WaveSurfer from 'wavesurfer.js';
 import {
     Play, Pause, Scissors, Trash2, ChevronLeft, ChevronRight,
-    SkipBack, SkipForward, ZoomIn, ZoomOut, Plus
+    SkipBack, SkipForward, ZoomIn, ZoomOut, Plus, GripVertical
 } from 'lucide-react';
 import { useAppStore, type CutSegment } from '../../../store/useAppStore';
 
@@ -33,8 +33,14 @@ export const Step3Edit: React.FC = () => {
     const [currentTime, setCurrentTime] = useState(0);
     const [isPlaying, setIsPlaying] = useState(false);
     const [zoom, setZoom] = useState(80);
+    const [waveScroll, setWaveScroll] = useState({ left: 0, width: 0 });
     const [markIn, setMarkIn] = useState<number | null>(null);
     const [selectedCut, setSelectedCut] = useState<string | null>(null);
+    const [dragging, setDragging] = useState<{ cutId: string; edge: 'start' | 'end' } | null>(null);
+
+    /* ref to always access latest cuts during drag (avoids stale closure) */
+    const cutsRef = useRef(cuts);
+    useEffect(() => { cutsRef.current = cuts; }, [cuts]);
 
     /* ── create object URLs ── */
     useEffect(() => {
@@ -48,14 +54,16 @@ export const Step3Edit: React.FC = () => {
 
     /* ── WaveSurfer init (audio waveform on timeline) ── */
     useEffect(() => {
-        if (!audioFile || !waveContainerRef.current) return;
+        // Use audioFile if available, otherwise extract audio from videoFile
+        const sourceFile = audioFile ?? videoFile;
+        if (!sourceFile || !waveContainerRef.current) return;
         if (wsRef.current) { wsRef.current.destroy(); wsRef.current = null; }
 
-        const url = URL.createObjectURL(audioFile);
+        const url = URL.createObjectURL(sourceFile);
         wsRef.current = WaveSurfer.create({
             container: waveContainerRef.current,
-            waveColor: '#6366F1',
-            progressColor: '#4338CA',
+            waveColor: '#818CF8',
+            progressColor: '#4F46E5',
             cursorColor: '#EF4444',
             height: 80,
             normalize: true,
@@ -72,6 +80,21 @@ export const Step3Edit: React.FC = () => {
         wsRef.current.on('ready', (d) => {
             setDuration(d);
             try { wsRef.current?.zoom(zoom); } catch (_) { /* */ }
+
+            // Track WaveSurfer's scroll position and content width
+            const updateScrollInfo = () => {
+                const el = waveContainerRef.current?.querySelector<HTMLElement>('div') as HTMLElement | null;
+                if (el) {
+                    setWaveScroll({ left: el.scrollLeft, width: el.scrollWidth });
+                }
+            };
+            updateScrollInfo();
+
+            // Observe scroll events on the WaveSurfer wrapper
+            const scrollEls = waveContainerRef.current?.querySelectorAll('div') || [];
+            scrollEls.forEach(el => {
+                el.addEventListener('scroll', updateScrollInfo);
+            });
         });
         wsRef.current.on('click', (progress: number) => {
             const t = progress * (wsRef.current?.getDuration() || 0);
@@ -82,11 +105,18 @@ export const Step3Edit: React.FC = () => {
             if (wsRef.current) { wsRef.current.destroy(); wsRef.current = null; }
             URL.revokeObjectURL(url);
         };
-    }, [audioFile]);
+    }, [audioFile, videoFile]);
 
     /* ── zoom ── */
     useEffect(() => {
         try { wsRef.current?.zoom(zoom); } catch (_) { /* */ }
+        // Update content width after zoom
+        requestAnimationFrame(() => {
+            const el = waveContainerRef.current?.querySelector<HTMLElement>('div') as HTMLElement | null;
+            if (el) {
+                setWaveScroll(prev => ({ ...prev, width: el.scrollWidth }));
+            }
+        });
     }, [zoom]);
 
     /* ── sync video/audio time ── */
@@ -96,19 +126,30 @@ export const Step3Edit: React.FC = () => {
         if (audioRef.current) audioRef.current.currentTime = Math.max(0, t - syncOffset);
     }, [syncOffset]);
 
-    /* ── time update loop ── */
+    /* ── time update loop (with ripple-delete skip) ── */
     useEffect(() => {
         if (!isPlaying) return;
         let raf: number;
         const tick = () => {
             if (videoRef.current) {
+                const t = videoRef.current.currentTime;
+                // Skip over cut regions
+                for (const cut of cuts) {
+                    if (t >= cut.start && t < cut.end) {
+                        videoRef.current.currentTime = cut.end;
+                        if (audioRef.current) {
+                            audioRef.current.currentTime = Math.max(0, cut.end - syncOffset);
+                        }
+                        break;
+                    }
+                }
                 setCurrentTime(videoRef.current.currentTime);
             }
             raf = requestAnimationFrame(tick);
         };
         raf = requestAnimationFrame(tick);
         return () => cancelAnimationFrame(raf);
-    }, [isPlaying]);
+    }, [isPlaying, cuts, syncOffset]);
 
     /* ── play / pause ── */
     const togglePlay = useCallback(() => {
@@ -135,7 +176,7 @@ export const Step3Edit: React.FC = () => {
     }, [seekTo, currentTime, duration]);
 
     /* ── cut operations ── */
-    const handleMarkIn = () => setMarkIn(currentTime);
+    const handleMarkIn = () => setMarkIn(markIn !== null ? null : currentTime);
 
     const handleCutOut = () => {
         if (markIn === null) return;
@@ -157,6 +198,7 @@ export const Step3Edit: React.FC = () => {
         seekTo(cut.start);
     };
 
+
     /* ── sorted cuts ── */
     const sortedCuts = useMemo(() =>
         [...cuts].sort((a, b) => a.start - b.start),
@@ -165,6 +207,59 @@ export const Step3Edit: React.FC = () => {
 
     /* ── timeline progress ── */
     const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
+
+    /* ── drag handle for cut edges ── */
+    const handleEdgeDrag = useCallback((e: React.MouseEvent, cutId: string, edge: 'start' | 'end') => {
+        e.stopPropagation();
+        e.preventDefault();
+        const cut = cutsRef.current.find(c => c.id === cutId);
+        if (!cut) return;
+
+        const totalPx = waveScroll.width || 1;
+        const startX = e.clientX;
+        const origStart = cut.start;
+        const origEnd = cut.end;
+        const MIN_DUR = 0.05;
+
+        setDragging({ cutId, edge });
+        document.body.style.cursor = 'col-resize';
+
+        const onMove = (ev: MouseEvent) => {
+            const dx = ev.clientX - startX;
+            const dt = (dx / totalPx) * duration;
+            setCuts(cutsRef.current.map(c => {
+                if (c.id !== cutId) return c;
+                if (edge === 'start') {
+                    return { ...c, start: Math.max(0, Math.min(origEnd - MIN_DUR, origStart + dt)) };
+                } else {
+                    return { ...c, end: Math.min(duration, Math.max(origStart + MIN_DUR, origEnd + dt)) };
+                }
+            }));
+        };
+        const onUp = () => {
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+            setDragging(null);
+            document.body.style.cursor = '';
+        };
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+    }, [duration, setCuts, waveScroll.width]);
+
+    /* ── nudge a cut edge by delta seconds ── */
+    const nudgeCutEdge = useCallback((cutId: string, edge: 'start' | 'end', delta: number) => {
+        setCuts(cutsRef.current.map(c => {
+            if (c.id !== cutId) return c;
+            const MIN_DUR = 0.05;
+            if (edge === 'start') {
+                const newStart = Math.max(0, Math.min(c.end - MIN_DUR, c.start + delta));
+                return { ...c, start: newStart };
+            } else {
+                const newEnd = Math.min(duration, Math.max(c.start + MIN_DUR, c.end + delta));
+                return { ...c, end: newEnd };
+            }
+        }));
+    }, [duration, setCuts]);
 
     /* ── render ── */
     return (
@@ -203,8 +298,13 @@ export const Step3Edit: React.FC = () => {
                                 ref={videoRef}
                                 src={videoUrl.current}
                                 className="w-full h-full object-contain"
+                                onLoadedMetadata={() => {
+                                    if (videoRef.current && duration === 0) {
+                                        setDuration(videoRef.current.duration);
+                                    }
+                                }}
                                 onEnded={() => setIsPlaying(false)}
-                                muted
+                                muted={!!audioFile}
                             />
                         )}
                         {audioFile && (
@@ -253,8 +353,8 @@ export const Step3Edit: React.FC = () => {
                                 onClick={handleMarkIn}
                                 className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all ${markIn !== null ? 'bg-red-100 text-red-700 border border-red-300' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
                             >
-                                <Plus size={16} />
-                                {markIn !== null ? `Başlangıç: ${fmtTime(markIn)}` : 'Başlangıç İşaretle'}
+                                {markIn !== null ? <Trash2 size={16} /> : <Plus size={16} />}
+                                {markIn !== null ? `Kaldır: ${fmtTime(markIn)}` : 'Başlangıç İşaretle'}
                             </button>
                             <button
                                 onClick={handleCutOut}
@@ -281,32 +381,111 @@ export const Step3Edit: React.FC = () => {
                             </div>
 
                             {/* Waveform */}
-                            <div className="bg-slate-900 rounded-xl overflow-hidden border border-slate-700 relative">
+                            <div className="bg-white rounded-xl overflow-hidden border border-gray-200 relative shadow-sm">
                                 <div ref={waveContainerRef} className="w-full h-[80px]" />
 
-                                {/* Cut regions overlay */}
-                                {duration > 0 && sortedCuts.map(cut => {
-                                    const left = (cut.start / duration) * 100;
-                                    const width = ((cut.end - cut.start) / duration) * 100;
-                                    return (
-                                        <div
-                                            key={cut.id}
-                                            className={`absolute top-0 h-full bg-red-500/30 border-x-2 border-red-500 cursor-pointer
-                                                ${selectedCut === cut.id ? 'bg-red-500/50 ring-2 ring-red-400' : 'hover:bg-red-500/40'}`}
-                                            style={{ left: `${left}%`, width: `${width}%` }}
-                                            onClick={() => jumpToCut(cut)}
-                                            title={`${fmtTime(cut.start)} → ${fmtTime(cut.end)}`}
-                                        >
-                                            <Scissors size={10} className="absolute top-1 left-1 text-red-300" />
-                                        </div>
-                                    );
-                                })}
-
-                                {/* Playhead */}
+                                {/* Cut regions overlay – React-rendered, scroll-synced */}
                                 <div
-                                    className="absolute top-0 h-full w-px bg-white/80 pointer-events-none z-10 shadow-[0_0_4px_rgba(255,255,255,0.5)]"
-                                    style={{ left: `${progressPercent}%` }}
-                                />
+                                    className="absolute top-0 left-0 h-full overflow-hidden pointer-events-none"
+                                    style={{ width: '100%' }}
+                                >
+                                    <div style={{
+                                        width: waveScroll.width > 0 ? waveScroll.width : '100%',
+                                        height: '100%',
+                                        position: 'relative',
+                                        transform: `translateX(-${waveScroll.left}px)`,
+                                    }}>
+                                        {duration > 0 && sortedCuts.map(cut => {
+                                            const left = (cut.start / duration) * 100;
+                                            const w = ((cut.end - cut.start) / duration) * 100;
+                                            {
+                                                const isActive = selectedCut === cut.id;
+                                                const isDraggingThis = dragging?.cutId === cut.id;
+                                                const isDraggingStart = isDraggingThis && dragging?.edge === 'start';
+                                                const isDraggingEnd = isDraggingThis && dragging?.edge === 'end';
+                                                return (
+                                                    <div
+                                                        key={cut.id}
+                                                        className="absolute top-0 h-full cursor-pointer pointer-events-auto group/cut"
+                                                        style={{
+                                                            left: `${left}%`,
+                                                            width: `${w}%`,
+                                                            background: isDraggingThis
+                                                                ? 'rgba(239,68,68,0.55)'
+                                                                : isActive ? 'rgba(239,68,68,0.45)' : 'rgba(239,68,68,0.25)',
+                                                            borderLeft: '2px solid rgb(239,68,68)',
+                                                            borderRight: '2px solid rgb(239,68,68)',
+                                                            boxShadow: isDraggingThis
+                                                                ? '0 0 8px 2px rgba(239,68,68,0.5)'
+                                                                : isActive ? '0 0 0 2px rgba(248,113,113,0.8)' : undefined,
+                                                            transition: isDraggingThis ? 'none' : 'background 0.15s, box-shadow 0.15s',
+                                                        }}
+                                                        onClick={() => jumpToCut(cut)}
+                                                        title={`${fmtTime(cut.start)} → ${fmtTime(cut.end)}`}
+                                                    >
+                                                        {/* Left drag handle */}
+                                                        <div
+                                                            className="absolute top-0 h-full cursor-col-resize z-20 flex items-center justify-center"
+                                                            style={{
+                                                                left: -6,
+                                                                width: 12,
+                                                                background: isDraggingStart
+                                                                    ? 'rgba(220,38,38,0.95)'
+                                                                    : 'rgba(239,68,68,0.7)',
+                                                                borderRadius: '3px 0 0 3px',
+                                                                transition: isDraggingStart ? 'none' : 'background 0.15s, box-shadow 0.15s',
+                                                                boxShadow: isDraggingStart ? '0 0 6px rgba(220,38,38,0.6)' : undefined,
+                                                            }}
+                                                            onMouseDown={(e) => handleEdgeDrag(e, cut.id, 'start')}
+                                                        >
+                                                            <GripVertical size={10} className="text-white/90" />
+                                                            {/* Tooltip while dragging */}
+                                                            {isDraggingStart && (
+                                                                <div className="absolute -top-7 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-[10px] font-mono px-1.5 py-0.5 rounded whitespace-nowrap shadow-lg z-30">
+                                                                    {fmtTime(cut.start)}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                        {/* Right drag handle */}
+                                                        <div
+                                                            className="absolute top-0 h-full cursor-col-resize z-20 flex items-center justify-center"
+                                                            style={{
+                                                                right: -6,
+                                                                width: 12,
+                                                                background: isDraggingEnd
+                                                                    ? 'rgba(220,38,38,0.95)'
+                                                                    : 'rgba(239,68,68,0.7)',
+                                                                borderRadius: '0 3px 3px 0',
+                                                                transition: isDraggingEnd ? 'none' : 'background 0.15s, box-shadow 0.15s',
+                                                                boxShadow: isDraggingEnd ? '0 0 6px rgba(220,38,38,0.6)' : undefined,
+                                                            }}
+                                                            onMouseDown={(e) => handleEdgeDrag(e, cut.id, 'end')}
+                                                        >
+                                                            <GripVertical size={10} className="text-white/90" />
+                                                            {/* Tooltip while dragging */}
+                                                            {isDraggingEnd && (
+                                                                <div className="absolute -top-7 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-[10px] font-mono px-1.5 py-0.5 rounded whitespace-nowrap shadow-lg z-30">
+                                                                    {fmtTime(cut.end)}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                );
+                                            }
+                                        })}
+
+                                        {/* Playhead */}
+                                        <div
+                                            className="absolute top-0 h-full pointer-events-none z-10"
+                                            style={{
+                                                left: `${progressPercent}%`,
+                                                width: 2,
+                                                background: 'rgba(15,23,42,0.85)',
+                                                boxShadow: '0 0 4px rgba(15,23,42,0.3)',
+                                            }}
+                                        />
+                                    </div>
+                                </div>
                             </div>
 
                             {/* Simple scrubber bar below waveform */}
@@ -366,10 +545,46 @@ export const Step3Edit: React.FC = () => {
                                                 : 'bg-gray-50 border border-gray-100 hover:bg-gray-100'
                                             }`}
                                     >
-                                        <div>
+                                        <div className="flex-1 min-w-0">
                                             <span className="text-xs text-gray-400 font-medium">Kesim {i + 1}</span>
-                                            <div className="font-mono text-sm font-semibold text-gray-800">
-                                                {fmtTime(cut.start)} → {fmtTime(cut.end)}
+                                            {/* Start time with nudge */}
+                                            <div className="flex items-center gap-1 mt-0.5">
+                                                <button
+                                                    onClick={(e) => { e.stopPropagation(); nudgeCutEdge(cut.id, 'start', -0.1); }}
+                                                    className="p-0.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                                                    title="Başlangıcı 0.1s geri al"
+                                                >
+                                                    <ChevronLeft size={12} />
+                                                </button>
+                                                <span className="font-mono text-xs font-semibold text-gray-700 w-12 text-center">
+                                                    {fmtTime(cut.start)}
+                                                </span>
+                                                <button
+                                                    onClick={(e) => { e.stopPropagation(); nudgeCutEdge(cut.id, 'start', 0.1); }}
+                                                    className="p-0.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                                                    title="Başlangıcı 0.1s ileri al"
+                                                >
+                                                    <ChevronRight size={12} />
+                                                </button>
+                                                <span className="text-gray-300 mx-0.5">→</span>
+                                                {/* End time with nudge */}
+                                                <button
+                                                    onClick={(e) => { e.stopPropagation(); nudgeCutEdge(cut.id, 'end', -0.1); }}
+                                                    className="p-0.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                                                    title="Bitişi 0.1s geri al"
+                                                >
+                                                    <ChevronLeft size={12} />
+                                                </button>
+                                                <span className="font-mono text-xs font-semibold text-gray-700 w-12 text-center">
+                                                    {fmtTime(cut.end)}
+                                                </span>
+                                                <button
+                                                    onClick={(e) => { e.stopPropagation(); nudgeCutEdge(cut.id, 'end', 0.1); }}
+                                                    className="p-0.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                                                    title="Bitişi 0.1s ileri al"
+                                                >
+                                                    <ChevronRight size={12} />
+                                                </button>
                                             </div>
                                             <span className="text-[10px] text-gray-400">
                                                 {(cut.end - cut.start).toFixed(1)}s süre
