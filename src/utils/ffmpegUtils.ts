@@ -14,7 +14,7 @@ export interface ExportConfig {
  * @param totalDuration The total duration of the video.
  * @returns A list of segments { start, end } to keep.
  */
-const getKeepSegments = (cuts: CutSegment[], totalDuration: number) => {
+export const getKeepSegments = (cuts: CutSegment[], totalDuration: number) => {
     if (cuts.length === 0) {
         return [{ start: 0, end: totalDuration }];
     }

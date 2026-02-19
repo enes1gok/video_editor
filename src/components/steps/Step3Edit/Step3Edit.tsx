@@ -59,6 +59,14 @@ export const Step3Edit: React.FC = () => {
         if (audioRef.current) audioRef.current.currentTime = Math.max(0, t - syncOffset);
     }, [syncOffset]);
 
+    /* Stable ref so WaveSurfer click handler always uses latest seekTo without causing re-init */
+    const seekToRef = useRef(seekTo);
+    useEffect(() => { seekToRef.current = seekTo; }, [seekTo]);
+
+    /* Stable ref for zoom so the ready handler reads the current value */
+    const zoomRef = useRef(zoom);
+    useEffect(() => { zoomRef.current = zoom; }, [zoom]);
+
     /* ── WaveSurfer init (audio waveform on timeline) ── */
     useEffect(() => {
         // Use audioFile if available, otherwise extract audio from videoFile
@@ -86,7 +94,8 @@ export const Step3Edit: React.FC = () => {
         wsRef.current.load(url);
         wsRef.current.on('ready', (d) => {
             setDuration(d);
-            try { wsRef.current?.zoom(zoom); } catch { /* */ }
+            // Read current zoom from ref (not stale closure)
+            try { wsRef.current?.zoom(zoomRef.current); } catch { /* */ }
 
             // Track WaveSurfer's scroll position and content width
             const updateScrollInfo = () => {
@@ -95,7 +104,11 @@ export const Step3Edit: React.FC = () => {
                     setWaveScroll({ left: el.scrollLeft, width: el.scrollWidth });
                 }
             };
-            updateScrollInfo();
+
+            // Wait one frame for WaveSurfer to fully render its canvas
+            requestAnimationFrame(() => {
+                updateScrollInfo();
+            });
 
             // Observe scroll events on the WaveSurfer wrapper
             const scrollEls = waveContainerRef.current?.querySelectorAll('div') || [];
@@ -105,14 +118,17 @@ export const Step3Edit: React.FC = () => {
         });
         wsRef.current.on('click', (progress: number) => {
             const t = progress * (wsRef.current?.getDuration() || 0);
-            seekTo(t);
+            seekToRef.current(t); // Use ref — always latest, no dependency
         });
 
         return () => {
             if (wsRef.current) { wsRef.current.destroy(); wsRef.current = null; }
             URL.revokeObjectURL(url);
         };
-    }, [audioFile, videoFile, seekTo, zoom]);
+        // Only re-init when source files actually change
+        // zoom is handled by separate effect, seekTo via ref
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [audioFile, videoFile]);
 
     /* ── zoom ── */
     useEffect(() => {

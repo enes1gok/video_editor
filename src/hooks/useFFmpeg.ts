@@ -16,7 +16,8 @@ export const useFFmpeg = () => {
         }
 
         setIsLoading(true);
-        const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
+        // Load from local public directory — avoids CORS/COEP issues with CDN
+        const baseURL = `${window.location.origin}/ffmpeg`;
         try {
             await ffmpeg.load({
                 coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
