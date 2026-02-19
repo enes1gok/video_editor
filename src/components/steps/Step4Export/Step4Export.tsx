@@ -1,7 +1,7 @@
 import React, { useRef, useState, useCallback, useEffect } from 'react';
 import {
     Download, ArrowLeft, Film, Volume2, Settings, Check,
-    Loader2, Play, FileVideo, HardDrive, Clock, Sparkles
+    Loader2, Play, FileVideo, HardDrive, Clock, Sparkles, AudioLines
 } from 'lucide-react';
 import { useAppStore } from '../../../store/useAppStore';
 
@@ -15,6 +15,7 @@ interface ExportConfig {
     quality: ExportQuality;
     includeAudio: boolean;
     applyCuts: boolean;
+    normalizeAudio: boolean;
 }
 
 const QUALITY_LABELS: Record<ExportQuality, { label: string; desc: string; icon: string }> = {
@@ -48,6 +49,7 @@ export const Step4Export: React.FC = () => {
         quality: 'high',
         includeAudio: !!audioFile,
         applyCuts: cuts.length > 0,
+        normalizeAudio: true,  // podcast standard loudness normalization on by default
     });
     const [progress, setProgress] = useState(0);
     const [progressLabel, setProgressLabel] = useState('');
@@ -90,6 +92,63 @@ export const Step4Export: React.FC = () => {
         })()
         : 0;
 
+    /* ── Build FFmpeg command args ── */
+    const buildFfmpegArgs = useCallback((): string[] => {
+        const args: string[] = [];
+
+        // Input: video
+        args.push('-i', 'input_video');
+
+        // Input: external audio (if included)
+        if (config.includeAudio && audioFile) {
+            args.push('-i', 'input_audio');
+        }
+
+        // Audio filter chain
+        const audioFilters: string[] = [];
+
+        // Sync offset for external audio
+        if (config.includeAudio && audioFile && syncOffset !== 0) {
+            const delayMs = Math.round(Math.abs(syncOffset) * 1000);
+            if (syncOffset > 0) {
+                audioFilters.push(`adelay=${delayMs}|${delayMs}`);
+            } else {
+                args.push('-ss', Math.abs(syncOffset).toFixed(3));
+            }
+        }
+
+        // Loudness normalization (EBU R128 / Netflix-Spotify standard)
+        if (config.normalizeAudio) {
+            audioFilters.push('loudnorm=I=-16:TP=-1.5:LRA=11');
+        }
+
+        // Apply audio filters
+        if (audioFilters.length > 0) {
+            args.push('-af', audioFilters.join(','));
+        }
+
+        // Video codec & quality
+        if (config.format === 'mp4') {
+            const crf = config.quality === 'high' ? '18' : config.quality === 'medium' ? '23' : '28';
+            args.push('-c:v', 'libx264', '-crf', crf, '-preset', 'medium');
+        } else {
+            const crf = config.quality === 'high' ? '30' : config.quality === 'medium' ? '35' : '40';
+            args.push('-c:v', 'libvpx-vp9', '-crf', crf, '-b:v', '0');
+        }
+
+        // Audio codec
+        if (config.includeAudio || !audioFile) {
+            args.push('-c:a', config.format === 'mp4' ? 'aac' : 'libopus', '-b:a', '192k');
+        } else {
+            args.push('-an');
+        }
+
+        // Output
+        args.push(`output.${config.format}`);
+
+        return args;
+    }, [config, audioFile, syncOffset]);
+
     /* ── Export handler (simulated — real FFmpeg would run here) ── */
     const handleExport = useCallback(async () => {
         if (!videoFile) return;
@@ -97,11 +156,16 @@ export const Step4Export: React.FC = () => {
         setPhase('processing');
         setProgress(0);
 
+        // Log the FFmpeg command that would be used
+        const ffmpegArgs = buildFfmpegArgs();
+        console.log('[PodCut] FFmpeg command:', 'ffmpeg', ffmpegArgs.join(' '));
+
         // Simulate export stages
         const stages = [
-            { label: 'Medya dosyaları okunuyor...', duration: 800, to: 0.15 },
-            { label: 'Ses senkronizasyonu uygulanıyor...', duration: 600, to: 0.25 },
-            { label: 'Kesimler işleniyor...', duration: config.applyCuts ? 1200 : 200, to: 0.45 },
+            { label: 'Medya dosyaları okunuyor...', duration: 800, to: 0.10 },
+            { label: 'Ses senkronizasyonu uygulanıyor...', duration: 600, to: 0.20 },
+            { label: 'Kesimler işleniyor...', duration: config.applyCuts ? 1200 : 200, to: 0.40 },
+            { label: 'Ses seviyesi dengeleniyor (loudnorm)...', duration: config.normalizeAudio ? 1000 : 100, to: 0.55 },
             { label: 'Video kodlanıyor...', duration: 2500, to: 0.85 },
             { label: 'Ses birleştiriliyor...', duration: config.includeAudio ? 800 : 200, to: 0.95 },
             { label: 'Son düzenlemeler...', duration: 400, to: 1.0 },
@@ -122,7 +186,7 @@ export const Step4Export: React.FC = () => {
         setOutputBlob(blob);
         setOutputUrl(url);
         setPhase('done');
-    }, [videoFile, config]);
+    }, [videoFile, config, buildFfmpegArgs]);
 
     /* ── Download ── */
     const handleDownload = useCallback(() => {
@@ -171,8 +235,8 @@ export const Step4Export: React.FC = () => {
                                             key={key}
                                             onClick={() => setConfig(c => ({ ...c, format: key }))}
                                             className={`p-4 rounded-xl border-2 text-left transition-all ${config.format === key
-                                                    ? 'border-blue-500 bg-blue-50 shadow-md shadow-blue-100'
-                                                    : 'border-gray-100 hover:border-gray-300 bg-white'
+                                                ? 'border-blue-500 bg-blue-50 shadow-md shadow-blue-100'
+                                                : 'border-gray-100 hover:border-gray-300 bg-white'
                                                 }`}
                                         >
                                             <div className="flex items-center justify-between mb-1">
@@ -197,8 +261,8 @@ export const Step4Export: React.FC = () => {
                                             key={key}
                                             onClick={() => setConfig(c => ({ ...c, quality: key }))}
                                             className={`p-4 rounded-xl border-2 text-center transition-all ${config.quality === key
-                                                    ? 'border-blue-500 bg-blue-50 shadow-md shadow-blue-100'
-                                                    : 'border-gray-100 hover:border-gray-300 bg-white'
+                                                ? 'border-blue-500 bg-blue-50 shadow-md shadow-blue-100'
+                                                : 'border-gray-100 hover:border-gray-300 bg-white'
                                                 }`}
                                         >
                                             <span className="text-2xl block mb-2">{val.icon}</span>
@@ -250,6 +314,22 @@ export const Step4Export: React.FC = () => {
                                             />
                                         </label>
                                     )}
+                                    {/* Loudness Normalization */}
+                                    <label className="flex items-center justify-between p-3 bg-gray-50 rounded-xl cursor-pointer hover:bg-gray-100 transition-colors">
+                                        <div className="flex items-center gap-3">
+                                            <AudioLines size={16} className="text-gray-500" />
+                                            <div>
+                                                <span className="text-sm font-medium text-gray-800">Ses dengeleme (Loudnorm)</span>
+                                                <span className="text-xs text-gray-400 block">Spotify/Netflix standardında ses seviyesi (EBU R128)</span>
+                                            </div>
+                                        </div>
+                                        <input
+                                            type="checkbox"
+                                            checked={config.normalizeAudio}
+                                            onChange={e => setConfig(c => ({ ...c, normalizeAudio: e.target.checked }))}
+                                            className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500"
+                                        />
+                                    </label>
                                 </div>
                             </div>
                         </div>
@@ -298,6 +378,12 @@ export const Step4Export: React.FC = () => {
                                             </span>
                                         </div>
                                     )}
+                                    <div className="flex justify-between text-sm">
+                                        <span className="text-gray-500">Ses dengeleme</span>
+                                        <span className={`font-medium ${config.normalizeAudio ? 'text-green-600' : 'text-gray-400'}`}>
+                                            {config.normalizeAudio ? 'Aktif (EBU R128)' : 'Kapalı'}
+                                        </span>
+                                    </div>
                                 </div>
 
                                 <div className="bg-gray-50 rounded-xl p-3 border border-gray-100 mb-6">
