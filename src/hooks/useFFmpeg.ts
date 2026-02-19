@@ -1,0 +1,42 @@
+import { useRef, useState, useCallback } from 'react';
+import { FFmpeg } from '@ffmpeg/ffmpeg';
+import { toBlobURL } from '@ffmpeg/util';
+
+export const useFFmpeg = () => {
+    const ffmpegRef = useRef(new FFmpeg());
+    const [isLoaded, setIsLoaded] = useState(false);
+    const [isLoading, setIsLoading] = useState(false);
+    const [message, setMessage] = useState('');
+
+    const load = useCallback(async () => {
+        const ffmpeg = ffmpegRef.current;
+        if (ffmpeg.loaded) {
+            setIsLoaded(true);
+            return;
+        }
+
+        setIsLoading(true);
+        const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
+        try {
+            await ffmpeg.load({
+                coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
+                wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
+            });
+            setIsLoaded(true);
+        } catch (error) {
+            console.error('Failed to load FFmpeg:', error);
+            setMessage('FFmpeg yüklenemedi. Lütfen sayfayı yenileyip tekrar deneyin.');
+        } finally {
+            setIsLoading(false);
+        }
+    }, []);
+
+    return {
+        ffmpeg: ffmpegRef.current,
+        isLoaded,
+        isLoading,
+        load,
+        message,
+        setMessage
+    };
+};
