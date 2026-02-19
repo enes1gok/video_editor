@@ -1,52 +1,75 @@
-import React from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import { Step1Input } from './components/steps/Step1Input/Step1Input';
 import { Step2Sync } from './components/steps/Step2Sync/Step2Sync';
 import { Step3Edit } from './components/steps/Step3Edit/Step3Edit';
 import { Step4Export } from './components/steps/Step4Export/Step4Export';
 import { useAppStore } from './store/useAppStore';
+import { ErrorBoundary } from './components/common/ErrorBoundary';
+import { StepBar } from './components/common/StepBar';
+
+const StepComponents: Record<number, React.FC> = {
+  1: Step1Input,
+  2: Step2Sync,
+  3: Step3Edit,
+  4: Step4Export,
+};
 
 function App() {
   const { currentStep } = useAppStore();
+  const [displayedStep, setDisplayedStep] = useState(currentStep);
+  const [direction, setDirection] = useState<'left' | 'right'>('right');
+  const [animating, setAnimating] = useState(false);
+  const prevStepRef = useRef(currentStep);
 
-  const renderStep = () => {
-    switch (currentStep) {
-      case 1:
-        return <Step1Input />;
-      case 2:
-        return <Step2Sync />;
-      case 3:
-        return <Step3Edit />;
-      case 4:
-        return <Step4Export />;
-      default:
-        return <Step1Input />;
+  useEffect(() => {
+    if (currentStep !== prevStepRef.current) {
+      setDirection(currentStep > prevStepRef.current ? 'right' : 'left');
+      setAnimating(true);
+
+      // After exit animation, swap content and do enter animation
+      const timer = setTimeout(() => {
+        setDisplayedStep(currentStep);
+        prevStepRef.current = currentStep;
+        // Short delay to allow the new content to mount before enter animation
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            setAnimating(false);
+          });
+        });
+      }, 200); // matches exit animation duration
+
+      return () => clearTimeout(timer);
     }
+  }, [currentStep]);
+
+  const Component = StepComponents[displayedStep] || Step1Input;
+
+  // Animation classes
+  const getTransformClass = () => {
+    if (!animating && displayedStep === currentStep) {
+      return 'translate-x-0 opacity-100';
+    }
+    if (animating && displayedStep !== currentStep) {
+      // Exiting: slide out
+      return direction === 'right'
+        ? '-translate-x-8 opacity-0'
+        : 'translate-x-8 opacity-0';
+    }
+    // Entering: start from offset
+    return direction === 'right'
+      ? 'translate-x-8 opacity-0'
+      : '-translate-x-8 opacity-0';
   };
 
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900">
-      <header className="bg-white shadow-sm p-4">
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <h1 className="text-xl font-bold text-blue-600">PodCut PWA</h1>
-          <div className="flex space-x-2 text-sm font-medium">
-            {[1, 2, 3, 4].map((step) => (
-              <div
-                key={step}
-                className={`w-8 h-8 rounded-full flex items-center justify-center ${currentStep === step
-                    ? 'bg-blue-600 text-white'
-                    : currentStep > step
-                      ? 'bg-green-500 text-white'
-                      : 'bg-gray-200 text-gray-500'
-                  }`}
-              >
-                {step}
-              </div>
-            ))}
-          </div>
-        </div>
-      </header>
+      <StepBar />
       <main className="max-w-7xl mx-auto p-4">
-        {renderStep()}
+        <div className={`transition-all duration-300 ease-out ${getTransformClass()}`}>
+          <ErrorBoundary>
+            <Component />
+          </ErrorBoundary>
+        </div>
       </main>
     </div>
   );

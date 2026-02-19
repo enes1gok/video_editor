@@ -1,5 +1,5 @@
 import React from 'react';
-import { FileVideo, FileAudio, CheckCircle } from 'lucide-react';
+import { FileVideo, FileAudio, CheckCircle, X } from 'lucide-react';
 import { useAppStore } from '../../../store/useAppStore';
 import { useFilePicker } from '../../../hooks/useFilePicker';
 
@@ -7,45 +7,61 @@ const FileCard: React.FC<{
     type: 'video' | 'audio';
     file: File | null;
     onPick: () => void;
+    onRemove: () => void;
     isLoading: boolean;
-}> = ({ type, file, onPick, isLoading }) => {
+}> = ({ type, file, onPick, onRemove, isLoading }) => {
     const isVideo = type === 'video';
     const Icon = isVideo ? FileVideo : FileAudio;
-    const label = isVideo ? 'Video Source (Camera)' : 'Audio Source (Microphone)';
-    const accept = isVideo
-        ? { 'video/*': ['.mp4', '.mov', '.webm', '.mkv'] }
-        : { 'audio/*': ['.mp3', '.wav', '.aac', '.m4a'] };
+    const label = isVideo ? 'Video Kaynağı (Kamera)' : 'Ses Kaynağı (Mikrofon)';
 
     return (
         <div
             className={`relative border-2 border-dashed rounded-xl p-8 flex flex-col items-center justify-center transition-all duration-200 cursor-pointer
-        ${file
+                ${file
                     ? 'border-green-500 bg-green-50'
                     : 'border-gray-300 hover:border-blue-500 hover:bg-blue-50'
-                }
-      `}
-            onClick={onPick}
+                }`}
+            onClick={file ? undefined : onPick}
         >
             {file ? (
                 <>
-                    <div className="absolute top-4 right-4 text-green-600">
-                        <CheckCircle size={24} />
+                    <div className="absolute top-3 left-3 text-green-600">
+                        <CheckCircle size={20} />
                     </div>
-                    <Icon size={48} className="text-green-600 mb-4" />
-                    <h3 className="text-lg font-semibold text-gray-900">{file.name}</h3>
-                    <p className="text-sm text-gray-500">{(file.size / (1024 * 1024)).toFixed(2)} MB</p>
+
+                    {/* Remove button */}
+                    <button
+                        onClick={(e) => { e.stopPropagation(); onRemove(); }}
+                        className="absolute top-3 right-3 w-8 h-8 flex items-center justify-center rounded-full
+                            bg-red-50 text-red-400 hover:bg-red-100 hover:text-red-600
+                            transition-colors"
+                        title="Dosyayı kaldır"
+                    >
+                        <X size={16} />
+                    </button>
+
+                    <Icon size={44} className="text-green-600 mb-3" />
+                    <h3 className="text-sm font-semibold text-gray-900 text-center truncate max-w-full">{file.name}</h3>
+                    <p className="text-xs text-gray-500 mt-1">{(file.size / (1024 * 1024)).toFixed(2)} MB</p>
+                    <button
+                        onClick={(e) => { e.stopPropagation(); onPick(); }}
+                        className="mt-3 text-xs text-blue-500 hover:text-blue-700 font-medium transition-colors"
+                    >
+                        Değiştir
+                    </button>
                 </>
             ) : (
                 <>
                     <Icon size={48} className="text-gray-400 mb-4" />
-                    <h3 className="text-lg font-semibold text-gray-900 mb-2">{label}</h3>
+                    <h3 className="text-lg font-semibold text-gray-900 mb-1">{label}</h3>
+                    {!isVideo && <span className="text-xs text-blue-500 font-medium mb-2">(İsteğe bağlı)</span>}
                     <p className="text-sm text-gray-500 text-center">
-                        Click to select or drag & drop<br />
+                        Seçmek için tıklayın veya sürükleyip bırakın<br />
                         <span className="text-xs opacity-75">
                             {isVideo ? 'MP4, MOV, WebM' : 'MP3, WAV, AAC'}
                         </span>
                     </p>
-                    {isLoading && <p className="text-sm text-blue-600 mt-2">Loading...</p>}
+                    {isLoading && <p className="text-sm text-blue-600 mt-2">Yükleniyor...</p>}
                 </>
             )}
         </div>
@@ -73,13 +89,13 @@ export const Step1Input: React.FC = () => {
         if (file) setAudioFile(file);
     };
 
-    const canProceed = !!videoFile && !!audioFile;
+    const canProceed = !!videoFile;
 
     return (
         <div className="max-w-4xl mx-auto py-12 px-4">
             <div className="text-center mb-12">
-                <h2 className="text-3xl font-bold text-gray-900">Upload Your Media</h2>
-                <p className="mt-2 text-gray-600">Select the camera recording and the high-quality microphone audio.</p>
+                <h2 className="text-3xl font-bold text-gray-900">Medya Dosyalarını Yükle</h2>
+                <p className="mt-2 text-gray-600">Kamera kaydını ve isteğe bağlı olarak harici mikrofon sesini seçin.</p>
             </div>
 
             <div className="grid md:grid-cols-2 gap-8 mb-12">
@@ -87,29 +103,35 @@ export const Step1Input: React.FC = () => {
                     type="video"
                     file={videoFile}
                     onPick={handlePickVideo}
+                    onRemove={() => setVideoFile(null)}
                     isLoading={videoPicker.isLoading}
                 />
                 <FileCard
                     type="audio"
                     file={audioFile}
                     onPick={handlePickAudio}
+                    onRemove={() => setAudioFile(null)}
                     isLoading={audioPicker.isLoading}
                 />
             </div>
 
             <div className="flex justify-center">
                 <button
-                    onClick={() => canProceed && setStep(2)}
+                    onClick={() => {
+                        if (canProceed) {
+                            setStep(audioFile ? 2 : 3);
+                        }
+                    }}
                     disabled={!canProceed}
                     className={`
-            flex items-center px-8 py-3 rounded-full text-lg font-semibold transition-all
-            ${canProceed
+                        flex items-center px-8 py-3 rounded-full text-lg font-semibold transition-all
+                        ${canProceed
                             ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-lg hover:shadow-xl'
                             : 'bg-gray-200 text-gray-400 cursor-not-allowed'
                         }
-          `}
+                    `}
                 >
-                    Continue to Sync
+                    {audioFile ? 'Senkronizasyona Devam Et' : 'Düzenlemeye Devam Et'}
                 </button>
             </div>
         </div>
