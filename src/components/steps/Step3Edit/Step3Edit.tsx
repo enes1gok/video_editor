@@ -176,9 +176,9 @@ export const Step3Edit: React.FC = () => {
     }, [seekTo, currentTime, duration]);
 
     /* ── cut operations ── */
-    const handleMarkIn = () => setMarkIn(markIn !== null ? null : currentTime);
+    const handleMarkIn = useCallback(() => setMarkIn(prev => prev !== null ? null : currentTime), [currentTime]);
 
-    const handleCutOut = () => {
+    const handleCutOut = useCallback(() => {
         if (markIn === null) return;
         const start = Math.min(markIn, currentTime);
         const end = Math.max(markIn, currentTime);
@@ -186,12 +186,12 @@ export const Step3Edit: React.FC = () => {
 
         setCuts([...cuts, { id: uid(), start, end }]);
         setMarkIn(null);
-    };
+    }, [markIn, currentTime, cuts, setCuts]);
 
-    const removeCut = (id: string) => {
+    const removeCut = useCallback((id: string) => {
         setCuts(cuts.filter(c => c.id !== id));
         if (selectedCut === id) setSelectedCut(null);
-    };
+    }, [cuts, setCuts, selectedCut]);
 
     const jumpToCut = (cut: CutSegment) => {
         setSelectedCut(cut.id);
@@ -260,6 +260,57 @@ export const Step3Edit: React.FC = () => {
             }
         }));
     }, [duration, setCuts]);
+
+    /* ── keyboard shortcuts ── */
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            // Ignore when typing in input/textarea/contenteditable
+            const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
+            if (tag === 'input' || tag === 'textarea' || (e.target as HTMLElement)?.isContentEditable) return;
+
+            switch (e.key.toLowerCase()) {
+                case ' ':           // Space → Play/Pause
+                    e.preventDefault();
+                    togglePlay();
+                    break;
+                case 'i':           // I → Mark In
+                    e.preventDefault();
+                    handleMarkIn();
+                    break;
+                case 'o':           // O → Cut Out
+                case 'x':           // X → Cut Out (alternative)
+                    e.preventDefault();
+                    handleCutOut();
+                    break;
+                case 'arrowleft':   // ← → Skip -1s
+                    e.preventDefault();
+                    skip(-1);
+                    break;
+                case 'arrowright':  // → → Skip +1s
+                    e.preventDefault();
+                    skip(1);
+                    break;
+                case 'j':           // J → Skip -5s
+                    e.preventDefault();
+                    skip(-5);
+                    break;
+                case 'l':           // L → Skip +5s
+                    e.preventDefault();
+                    skip(5);
+                    break;
+                case 'delete':      // Delete → Remove selected cut
+                case 'backspace':
+                    if (selectedCut) {
+                        e.preventDefault();
+                        removeCut(selectedCut);
+                    }
+                    break;
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [togglePlay, handleMarkIn, handleCutOut, skip, selectedCut, removeCut]);
 
     /* ── render ── */
     return (
@@ -365,6 +416,22 @@ export const Step3Edit: React.FC = () => {
                                 <Scissors size={16} />
                                 Kes
                             </button>
+                        </div>
+
+                        {/* Keyboard shortcut hints */}
+                        <div className="flex items-center justify-center gap-3 flex-wrap">
+                            {[
+                                { key: 'Space', label: 'Oynat/Duraklat' },
+                                { key: 'I', label: 'Başlangıç' },
+                                { key: 'O / X', label: 'Kes' },
+                                { key: 'J / L', label: '±5s' },
+                                { key: '← / →', label: '±1s' },
+                            ].map(s => (
+                                <span key={s.key} className="inline-flex items-center gap-1 text-[10px] text-gray-400">
+                                    <kbd className="px-1.5 py-0.5 bg-gray-100 border border-gray-200 rounded text-[10px] font-mono font-semibold text-gray-500">{s.key}</kbd>
+                                    {s.label}
+                                </span>
+                            ))}
                         </div>
 
                         {/* ── Timeline / Waveform ── */}
