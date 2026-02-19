@@ -137,17 +137,17 @@ export function computeCorrelation(
     target: Float32Array,
     lag: number
 ): number {
-    let sum = 0;
-    let count = 0;
+    const start = Math.max(0, -lag);
+    const end = Math.min(ref.length, target.length - lag);
 
-    for (let i = 0; i < ref.length; i++) {
-        const targetIdx = i + lag;
-        if (targetIdx < 0 || targetIdx >= target.length) continue;
-        sum += ref[i] * target[targetIdx];
-        count++;
+    if (start >= end) return 0;
+
+    let sum = 0;
+    for (let i = start; i < end; i++) {
+        sum += ref[i] * target[i + lag];
     }
 
-    return count > 0 ? sum / count : 0;
+    return sum / (end - start);
 }
 
 /**
