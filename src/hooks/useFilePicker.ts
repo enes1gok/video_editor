@@ -1,7 +1,9 @@
 import { useState } from 'react';
+import { validateFileSize, type FileSizeValidation } from '../utils/fileValidation';
 
 interface UseFilePickerOptions {
     accept: Record<string, string[]>;
+    type: 'video' | 'audio';
     multiple?: boolean;
 }
 
@@ -9,15 +11,27 @@ interface UseFilePickerReturn {
     pickFile: () => Promise<File | null>;
     isLoading: boolean;
     error: string | null;
+    warning: string | null;
 }
 
-export const useFilePicker = ({ accept }: UseFilePickerOptions): UseFilePickerReturn => {
+export const useFilePicker = ({ accept, type }: UseFilePickerOptions): UseFilePickerReturn => {
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [warning, setWarning] = useState<string | null>(null);
+
+    const applyValidation = (file: File): FileSizeValidation => {
+        const result = validateFileSize(file, type);
+        setWarning(result.warning ?? null);
+        if (!result.ok) {
+            setError(result.error ?? 'Dosya boyutu sınırı aşıldı.');
+        }
+        return result;
+    };
 
     const pickFile = async (): Promise<File | null> => {
         setIsLoading(true);
         setError(null);
+        setWarning(null);
         try {
             // Check if File System Access API is supported
             if ('showOpenFilePicker' in window) {
@@ -34,15 +48,14 @@ export const useFilePicker = ({ accept }: UseFilePickerOptions): UseFilePickerRe
 
                     if (handles && handles.length > 0) {
                         const file = await handles[0].getFile();
+                        const validation = applyValidation(file);
+                        if (!validation.ok) return null;
                         return file;
                     }
                 } catch (err: any) {
                     // User cancelled or other error
                     if (err.name !== 'AbortError') {
                         console.error("File System Access API error:", err);
-                        // Fallback to input if validation fails or other issues? 
-                        // Usually showOpenFilePicker is preferred but if it throws, we might want to fallback.
-                        // But for "AbortError" (cancel), we return null.
                         throw err;
                     }
                     return null;
@@ -57,7 +70,13 @@ export const useFilePicker = ({ accept }: UseFilePickerOptions): UseFilePickerRe
                     input.onchange = (e) => {
                         const files = (e.target as HTMLInputElement).files;
                         if (files && files.length > 0) {
-                            resolve(files[0]);
+                            const file = files[0];
+                            const validation = applyValidation(file);
+                            if (!validation.ok) {
+                                resolve(null);
+                                return;
+                            }
+                            resolve(file);
                         } else {
                             resolve(null);
                         }
@@ -75,5 +94,5 @@ export const useFilePicker = ({ accept }: UseFilePickerOptions): UseFilePickerRe
         return null;
     };
 
-    return { pickFile, isLoading, error };
+    return { pickFile, isLoading, error, warning };
 };

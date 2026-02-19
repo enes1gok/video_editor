@@ -6,6 +6,8 @@
  * different sources (e.g., camera mic vs. external mic).
  */
 
+import { estimateMemoryUsageMB, MAX_DECODE_DURATION_S, formatFileSize } from './fileValidation';
+
 export interface AutoSyncResult {
     /** Offset in seconds. Positive = audio starts later than video. */
     offsetSeconds: number;
@@ -16,10 +18,18 @@ export interface AutoSyncResult {
 const TARGET_SAMPLE_RATE = 8000; // Downsample to 8kHz for speed
 const MAX_OFFSET_SECONDS = 30;  // Maximum expected drift between tracks
 
+/** Maximum combined memory (MB) allowed before aborting decode. */
+const MAX_COMBINED_MEMORY_MB = 1536; // 1.5 GB
+
 /**
  * Decode a File to mono Float32Array at a target sample rate.
+ * @param maxDuration If provided, only decode up to this many seconds.
  */
-async function decodeToMono(file: File, sampleRate: number): Promise<Float32Array> {
+async function decodeToMono(
+    file: File,
+    sampleRate: number,
+    maxDuration?: number
+): Promise<Float32Array> {
     const arrayBuffer = await file.arrayBuffer();
 
     // Use OfflineAudioContext to decode & resample in one step
@@ -27,14 +37,16 @@ async function decodeToMono(file: File, sampleRate: number): Promise<Float32Arra
     const decoded = await tempCtx.decodeAudioData(arrayBuffer);
     await tempCtx.close();
 
-    const duration = decoded.duration;
-    const length = Math.ceil(duration * sampleRate);
+    const useDuration = maxDuration
+        ? Math.min(decoded.duration, maxDuration)
+        : decoded.duration;
+    const length = Math.ceil(useDuration * sampleRate);
 
     const offlineCtx = new OfflineAudioContext(1, length, sampleRate);
     const source = offlineCtx.createBufferSource();
     source.buffer = decoded;
     source.connect(offlineCtx.destination);
-    source.start(0);
+    source.start(0, 0, useDuration);
 
     const rendered = await offlineCtx.startRendering();
     return rendered.getChannelData(0);
@@ -43,7 +55,7 @@ async function decodeToMono(file: File, sampleRate: number): Promise<Float32Arra
 /**
  * Normalize a signal to [-1, 1] range.
  */
-function normalize(signal: Float32Array): Float32Array {
+export function normalize(signal: Float32Array): Float32Array {
     let max = 0;
     for (let i = 0; i < signal.length; i++) {
         const abs = Math.abs(signal[i]);
@@ -62,14 +74,14 @@ function normalize(signal: Float32Array): Float32Array {
  * Compute cross-correlation between two signals at various lag values.
  * Returns the lag (in samples) that produces the maximum correlation.
  */
-function findBestLag(
+export function findBestLag(
     reference: Float32Array,
     target: Float32Array,
     maxLagSamples: number
 ): { bestLag: number; confidence: number } {
     // Use a chunk of the reference signal for correlation
     // (don't need the entire signal, just enough to find the pattern)
-    const chunkSize = Math.min(reference.length, target.length, TARGET_SAMPLE_RATE * 10); // 10s chunk
+    const chunkSize = Math.min(reference.length, target.length, TARGET_SAMPLE_RATE * 30); // 30s chunk
     const refChunk = reference.slice(0, chunkSize);
 
     let bestCorrelation = -Infinity;
@@ -120,7 +132,7 @@ function findBestLag(
 /**
  * Compute normalized cross-correlation at a specific lag.
  */
-function computeCorrelation(
+export function computeCorrelation(
     ref: Float32Array,
     target: Float32Array,
     lag: number
@@ -139,7 +151,60 @@ function computeCorrelation(
 }
 
 /**
+ * Run the CPU-intensive correlation in a Web Worker.
+ * Falls back to main-thread execution if Worker creation fails.
+ */
+function runCorrelationInWorker(
+    videoSamples: Float32Array,
+    audioSamples: Float32Array
+): Promise<AutoSyncResult> {
+    return new Promise((resolve, reject) => {
+        try {
+            const worker = new Worker(
+                new URL('../workers/syncWorker.ts', import.meta.url),
+                { type: 'module' }
+            );
+
+            worker.onmessage = (e: MessageEvent<{ offsetSeconds: number; confidence: number }>) => {
+                resolve(e.data);
+                worker.terminate();
+            };
+
+            worker.onerror = (err) => {
+                worker.terminate();
+                reject(new Error(`Worker hatası: ${err.message}`));
+            };
+
+            // Transfer buffers (zero-copy) — note: originals become unusable
+            worker.postMessage(
+                {
+                    videoSamples,
+                    audioSamples,
+                    maxOffsetSeconds: MAX_OFFSET_SECONDS,
+                    sampleRate: TARGET_SAMPLE_RATE,
+                },
+                [videoSamples.buffer, audioSamples.buffer]
+            );
+        } catch {
+            // Worker not supported or creation failed → fallback to main thread
+            const normVideo = normalize(videoSamples);
+            const normAudio = normalize(audioSamples);
+            const maxLagSamples = Math.floor(MAX_OFFSET_SECONDS * TARGET_SAMPLE_RATE);
+            const { bestLag, confidence } = findBestLag(normVideo, normAudio, maxLagSamples);
+            resolve({
+                offsetSeconds: bestLag / TARGET_SAMPLE_RATE,
+                confidence,
+            });
+        }
+    });
+}
+
+/**
  * Main entry point: auto-sync two media files.
+ *
+ * Architecture:
+ * 1. Decode on main thread (AudioContext required)
+ * 2. Offload normalize + cross-correlation to Web Worker
  *
  * @param videoFile - The video file (reference track)
  * @param audioFile - The external audio file (to be aligned)
@@ -153,33 +218,27 @@ export async function autoSyncFiles(
 ): Promise<AutoSyncResult> {
     onProgress?.(0.1);
 
-    // Step 1: Decode both files to mono PCM
+    // Step 0: Pre-decode memory safety check
+    const estimatedMB = estimateMemoryUsageMB(videoFile) + estimateMemoryUsageMB(audioFile);
+    if (estimatedMB > MAX_COMBINED_MEMORY_MB) {
+        throw new Error(
+            `Toplam tahmini bellek kullanımı çok yüksek (${formatFileSize(estimatedMB * 1024 * 1024)}). ` +
+            `Tarayıcı çökebilir. Lütfen daha küçük dosyalar kullanın.`
+        );
+    }
+
+    // Step 1: Decode both files to mono PCM (main thread — AudioContext required)
     const [videoSamples, audioSamples] = await Promise.all([
-        decodeToMono(videoFile, TARGET_SAMPLE_RATE),
-        decodeToMono(audioFile, TARGET_SAMPLE_RATE),
+        decodeToMono(videoFile, TARGET_SAMPLE_RATE, MAX_DECODE_DURATION_S),
+        decodeToMono(audioFile, TARGET_SAMPLE_RATE, MAX_DECODE_DURATION_S),
     ]);
 
     onProgress?.(0.4);
 
-    // Step 2: Normalize both signals
-    const normVideo = normalize(videoSamples);
-    const normAudio = normalize(audioSamples);
-
-    onProgress?.(0.5);
-
-    // Step 3: Cross-correlate to find best alignment
-    const maxLagSamples = Math.floor(MAX_OFFSET_SECONDS * TARGET_SAMPLE_RATE);
-    const { bestLag, confidence } = findBestLag(normVideo, normAudio, maxLagSamples);
-
-    onProgress?.(0.9);
-
-    // Convert lag from samples to seconds
-    const offsetSeconds = bestLag / TARGET_SAMPLE_RATE;
+    // Step 2 + 3: Normalize & correlate in Web Worker (off main thread)
+    const result = await runCorrelationInWorker(videoSamples, audioSamples);
 
     onProgress?.(1.0);
 
-    return {
-        offsetSeconds,
-        confidence,
-    };
+    return result;
 }

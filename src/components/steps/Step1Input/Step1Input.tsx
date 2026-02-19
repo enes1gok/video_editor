@@ -1,5 +1,5 @@
 import React from 'react';
-import { FileVideo, FileAudio, CheckCircle, X } from 'lucide-react';
+import { FileVideo, FileAudio, CheckCircle, X, AlertTriangle, AlertCircle } from 'lucide-react';
 import { useAppStore } from '../../../store/useAppStore';
 import { useFilePicker } from '../../../hooks/useFilePicker';
 
@@ -9,7 +9,9 @@ const FileCard: React.FC<{
     onPick: () => void;
     onRemove: () => void;
     isLoading: boolean;
-}> = ({ type, file, onPick, onRemove, isLoading }) => {
+    warning?: string | null;
+    error?: string | null;
+}> = ({ type, file, onPick, onRemove, isLoading, warning, error: errorMsg }) => {
     const isVideo = type === 'video';
     const Icon = isVideo ? FileVideo : FileAudio;
     const label = isVideo ? 'Video Kaynağı (Kamera)' : 'Ses Kaynağı (Mikrofon)';
@@ -43,6 +45,15 @@ const FileCard: React.FC<{
                     <Icon size={44} className="text-green-600 mb-3" />
                     <h3 className="text-sm font-semibold text-gray-900 text-center truncate max-w-full">{file.name}</h3>
                     <p className="text-xs text-gray-500 mt-1">{(file.size / (1024 * 1024)).toFixed(2)} MB</p>
+
+                    {/* Size warning banner */}
+                    {warning && (
+                        <div className="mt-2 flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 w-full">
+                            <AlertTriangle size={14} className="text-amber-600 mt-0.5 shrink-0" />
+                            <span className="text-xs text-amber-700">{warning}</span>
+                        </div>
+                    )}
+
                     <button
                         onClick={(e) => { e.stopPropagation(); onPick(); }}
                         className="mt-3 text-xs text-blue-500 hover:text-blue-700 font-medium transition-colors"
@@ -62,6 +73,13 @@ const FileCard: React.FC<{
                         </span>
                     </p>
                     {isLoading && <p className="text-sm text-blue-600 mt-2">Yükleniyor...</p>}
+                    {/* Error banner (e.g. file too large) */}
+                    {errorMsg && (
+                        <div className="mt-3 flex items-start gap-2 bg-red-50 border border-red-200 rounded-lg px-3 py-2 w-full">
+                            <AlertCircle size={14} className="text-red-600 mt-0.5 shrink-0" />
+                            <span className="text-xs text-red-700">{errorMsg}</span>
+                        </div>
+                    )}
                 </>
             )}
         </div>
@@ -72,11 +90,13 @@ export const Step1Input: React.FC = () => {
     const { videoFile, audioFile, setVideoFile, setAudioFile, setStep } = useAppStore();
 
     const videoPicker = useFilePicker({
-        accept: { 'video/*': ['.mp4', '.mov', '.webm', '.mkv'] }
+        accept: { 'video/*': ['.mp4', '.mov', '.webm', '.mkv'] },
+        type: 'video',
     });
 
     const audioPicker = useFilePicker({
-        accept: { 'audio/*': ['.mp3', '.wav', '.aac', '.m4a'] }
+        accept: { 'audio/*': ['.mp3', '.wav', '.aac', '.m4a'] },
+        type: 'audio',
     });
 
     const handlePickVideo = async () => {
@@ -105,6 +125,8 @@ export const Step1Input: React.FC = () => {
                     onPick={handlePickVideo}
                     onRemove={() => setVideoFile(null)}
                     isLoading={videoPicker.isLoading}
+                    warning={videoPicker.warning}
+                    error={videoPicker.error}
                 />
                 <FileCard
                     type="audio"
@@ -112,6 +134,8 @@ export const Step1Input: React.FC = () => {
                     onPick={handlePickAudio}
                     onRemove={() => setAudioFile(null)}
                     isLoading={audioPicker.isLoading}
+                    warning={audioPicker.warning}
+                    error={audioPicker.error}
                 />
             </div>
 
