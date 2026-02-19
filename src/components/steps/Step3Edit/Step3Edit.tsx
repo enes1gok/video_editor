@@ -52,6 +52,13 @@ export const Step3Edit: React.FC = () => {
         };
     }, [videoFile, audioFile]);
 
+    /* ── sync video/audio time ── */
+    const seekTo = useCallback((t: number) => {
+        setCurrentTime(t);
+        if (videoRef.current) videoRef.current.currentTime = t;
+        if (audioRef.current) audioRef.current.currentTime = Math.max(0, t - syncOffset);
+    }, [syncOffset]);
+
     /* ── WaveSurfer init (audio waveform on timeline) ── */
     useEffect(() => {
         // Use audioFile if available, otherwise extract audio from videoFile
@@ -79,7 +86,7 @@ export const Step3Edit: React.FC = () => {
         wsRef.current.load(url);
         wsRef.current.on('ready', (d) => {
             setDuration(d);
-            try { wsRef.current?.zoom(zoom); } catch (_) { /* */ }
+            try { wsRef.current?.zoom(zoom); } catch { /* */ }
 
             // Track WaveSurfer's scroll position and content width
             const updateScrollInfo = () => {
@@ -105,11 +112,11 @@ export const Step3Edit: React.FC = () => {
             if (wsRef.current) { wsRef.current.destroy(); wsRef.current = null; }
             URL.revokeObjectURL(url);
         };
-    }, [audioFile, videoFile]);
+    }, [audioFile, videoFile, seekTo, zoom]);
 
     /* ── zoom ── */
     useEffect(() => {
-        try { wsRef.current?.zoom(zoom); } catch (_) { /* */ }
+        try { wsRef.current?.zoom(zoom); } catch { /* */ }
         // Update content width after zoom
         requestAnimationFrame(() => {
             const el = waveContainerRef.current?.querySelector<HTMLElement>('div') as HTMLElement | null;
@@ -118,13 +125,6 @@ export const Step3Edit: React.FC = () => {
             }
         });
     }, [zoom]);
-
-    /* ── sync video/audio time ── */
-    const seekTo = useCallback((t: number) => {
-        setCurrentTime(t);
-        if (videoRef.current) videoRef.current.currentTime = t;
-        if (audioRef.current) audioRef.current.currentTime = Math.max(0, t - syncOffset);
-    }, [syncOffset]);
 
     /* ── time update loop (with ripple-delete skip) ── */
     useEffect(() => {

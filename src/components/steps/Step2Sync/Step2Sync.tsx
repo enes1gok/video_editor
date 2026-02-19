@@ -236,13 +236,6 @@ export const Step2Sync: React.FC = () => {
     };
 
     // Drag handlers for manual mode
-    const handleMouseDown = (e: React.MouseEvent) => {
-        dragStartX.current = e.clientX;
-        draggingOffsetStart.current = audioOffsetRef.current;
-        document.addEventListener('mousemove', handleMouseMove);
-        document.addEventListener('mouseup', handleMouseUp);
-    };
-
     const handleMouseMove = useCallback((e: MouseEvent) => {
         if (dragStartX.current === null) return;
         const deltaPixels = e.clientX - dragStartX.current;
@@ -256,8 +249,16 @@ export const Step2Sync: React.FC = () => {
     const handleMouseUp = useCallback(() => {
         dragStartX.current = null;
         document.removeEventListener('mousemove', handleMouseMove);
+        // eslint-disable-next-line @typescript-eslint/no-use-before-define
         document.removeEventListener('mouseup', handleMouseUp);
     }, [handleMouseMove]);
+
+    const handleMouseDown = (e: React.MouseEvent) => {
+        dragStartX.current = e.clientX;
+        draggingOffsetStart.current = audioOffsetRef.current;
+        document.addEventListener('mousemove', handleMouseMove);
+        document.addEventListener('mouseup', handleMouseUp);
+    };
 
     // ── Render ──
 

@@ -1,0 +1,11 @@
+
+> video_editor@0.0.0 dev
+> vite
+
+
+  VITE v7.3.1  ready in 276 ms
+
+  ➜  Local:   http://localhost:5173/
+  ➜  Network: use --host to expose
+3:54:21 PM [vite] (client) hmr update /src/index.css
+3:55:13 PM [vite] (client) hmr update /src/index.css

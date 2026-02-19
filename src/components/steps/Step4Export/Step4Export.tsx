@@ -1,9 +1,12 @@
 import React, { useRef, useState, useCallback, useEffect } from 'react';
 import {
     Download, ArrowLeft, Film, Volume2, Settings, Check,
-    Loader2, Play, FileVideo, HardDrive, Clock, Sparkles, AudioLines
+    Loader2, FileVideo, HardDrive, Clock, Sparkles, AudioLines, AlertTriangle
 } from 'lucide-react';
 import { useAppStore } from '../../../store/useAppStore';
+import { useFFmpeg } from '../../../hooks/useFFmpeg';
+import { buildFFmpegCommand } from '../../../utils/ffmpegUtils';
+import { fetchFile } from '@ffmpeg/util';
 
 /* ── Types ── */
 type ExportFormat = 'mp4' | 'webm';
@@ -42,6 +45,7 @@ const fmtSize = (bytes: number) => {
 
 export const Step4Export: React.FC = () => {
     const { videoFile, audioFile, syncOffset, cuts, setStep } = useAppStore();
+    const { ffmpeg, load, isLoaded, isLoading: isFfmpegLoading, message: ffmpegMessage } = useFFmpeg();
 
     const [phase, setPhase] = useState<ExportPhase>('config');
     const [config, setConfig] = useState<ExportConfig>({
@@ -49,7 +53,7 @@ export const Step4Export: React.FC = () => {
         quality: 'high',
         includeAudio: !!audioFile,
         applyCuts: cuts.length > 0,
-        normalizeAudio: true,  // podcast standard loudness normalization on by default
+        normalizeAudio: true,
     });
     const [progress, setProgress] = useState(0);
     const [progressLabel, setProgressLabel] = useState('');
@@ -58,6 +62,11 @@ export const Step4Export: React.FC = () => {
     const [elapsedTime, setElapsedTime] = useState(0);
 
     const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+    // Initialize FFmpeg
+    useEffect(() => {
+        load();
+    }, [load]);
 
     // Cleanup URLs
     useEffect(() => {
@@ -69,7 +78,6 @@ export const Step4Export: React.FC = () => {
     // Timer for elapsed time during processing
     useEffect(() => {
         if (phase === 'processing') {
-            setElapsedTime(0);
             timerRef.current = setInterval(() => setElapsedTime(t => t + 1), 1000);
         } else {
             if (timerRef.current) clearInterval(timerRef.current);
@@ -85,108 +93,82 @@ export const Step4Export: React.FC = () => {
             const formatMultiplier = config.format === 'webm' ? 0.7 : 1;
             let cutReduction = 1;
             if (config.applyCuts && cuts.length > 0 && videoFile) {
-                // Rough estimate: we don't know total duration here, so estimate ~80%
-                cutReduction = 0.8;
+                cutReduction = 0.8; // Rough estimate
             }
             return Math.round(baseSize * qualityMultiplier * formatMultiplier * cutReduction);
         })()
         : 0;
 
-    /* ── Build FFmpeg command args ── */
-    const buildFfmpegArgs = useCallback((): string[] => {
-        const args: string[] = [];
-
-        // Input: video
-        args.push('-i', 'input_video');
-
-        // Input: external audio (if included)
-        if (config.includeAudio && audioFile) {
-            args.push('-i', 'input_audio');
-        }
-
-        // Audio filter chain
-        const audioFilters: string[] = [];
-
-        // Sync offset for external audio
-        if (config.includeAudio && audioFile && syncOffset !== 0) {
-            const delayMs = Math.round(Math.abs(syncOffset) * 1000);
-            if (syncOffset > 0) {
-                audioFilters.push(`adelay=${delayMs}|${delayMs}`);
-            } else {
-                args.push('-ss', Math.abs(syncOffset).toFixed(3));
-            }
-        }
-
-        // Loudness normalization (EBU R128 / Netflix-Spotify standard)
-        if (config.normalizeAudio) {
-            audioFilters.push('loudnorm=I=-16:TP=-1.5:LRA=11');
-        }
-
-        // Apply audio filters
-        if (audioFilters.length > 0) {
-            args.push('-af', audioFilters.join(','));
-        }
-
-        // Video codec & quality
-        if (config.format === 'mp4') {
-            const crf = config.quality === 'high' ? '18' : config.quality === 'medium' ? '23' : '28';
-            args.push('-c:v', 'libx264', '-crf', crf, '-preset', 'medium');
-        } else {
-            const crf = config.quality === 'high' ? '30' : config.quality === 'medium' ? '35' : '40';
-            args.push('-c:v', 'libvpx-vp9', '-crf', crf, '-b:v', '0');
-        }
-
-        // Audio codec
-        if (config.includeAudio || !audioFile) {
-            args.push('-c:a', config.format === 'mp4' ? 'aac' : 'libopus', '-b:a', '192k');
-        } else {
-            args.push('-an');
-        }
-
-        // Output
-        args.push(`output.${config.format}`);
-
-        return args;
-    }, [config, audioFile, syncOffset]);
-
-    /* ── Export handler (simulated — real FFmpeg would run here) ── */
+    /* ── Export handler ── */
     const handleExport = useCallback(async () => {
-        if (!videoFile) return;
+        if (!videoFile || !isLoaded) return;
 
         setPhase('processing');
         setProgress(0);
+        setElapsedTime(0);
+        setProgressLabel('FFmpeg başlatılıyor...');
 
-        // Log the FFmpeg command that would be used
-        const ffmpegArgs = buildFfmpegArgs();
-        console.log('[PodCut] FFmpeg command:', 'ffmpeg', ffmpegArgs.join(' '));
+        try {
+            // 1. Get Video Duration
+            setProgressLabel('Video analiz ediliyor...');
+            const tempVideo = document.createElement('video');
+            tempVideo.src = URL.createObjectURL(videoFile);
+            await new Promise((resolve) => {
+                tempVideo.onloadedmetadata = resolve;
+            });
+            const duration = tempVideo.duration;
 
-        // Simulate export stages
-        const stages = [
-            { label: 'Medya dosyaları okunuyor...', duration: 800, to: 0.10 },
-            { label: 'Ses senkronizasyonu uygulanıyor...', duration: 600, to: 0.20 },
-            { label: 'Kesimler işleniyor...', duration: config.applyCuts ? 1200 : 200, to: 0.40 },
-            { label: 'Ses seviyesi dengeleniyor (loudnorm)...', duration: config.normalizeAudio ? 1000 : 100, to: 0.55 },
-            { label: 'Video kodlanıyor...', duration: 2500, to: 0.85 },
-            { label: 'Ses birleştiriliyor...', duration: config.includeAudio ? 800 : 200, to: 0.95 },
-            { label: 'Son düzenlemeler...', duration: 400, to: 1.0 },
-        ];
+            // 2. Write Files
+            setProgressLabel('Dosyalar belleğe yükleniyor...');
+            await ffmpeg.writeFile('input_video', await fetchFile(videoFile));
 
-        for (const stage of stages) {
-            setProgressLabel(stage.label);
-            await new Promise(resolve => setTimeout(resolve, stage.duration));
-            setProgress(stage.to);
+            if (config.includeAudio && audioFile) {
+                await ffmpeg.writeFile('input_audio', await fetchFile(audioFile));
+            }
+
+            // 3. Build Command
+            const args = buildFFmpegCommand(config, cuts, duration, syncOffset, !!audioFile);
+            console.log('FFmpeg Command:', args.join(' '));
+
+            // 4. Execute
+            setProgressLabel('Video işleniyor...');
+
+            ffmpeg.on('progress', ({ progress }) => {
+                // FFmpeg reports progress 0-1
+                setProgress(Math.max(0, Math.min(1, progress)));
+            });
+
+            await ffmpeg.exec(args);
+
+            // 5. Read Output
+            setProgressLabel('Sonuç dosyası oluşturuluyor...');
+            const outputFilename = `output.${config.format}`;
+            const data = await ffmpeg.readFile(outputFilename);
+            // Cast data to any to handle SharedArrayBuffer type mismatch
+            const blob = new Blob([data as any], { type: `video/${config.format}` });
+            const url = URL.createObjectURL(blob);
+
+            setOutputBlob(blob);
+            setOutputUrl(url);
+            setPhase('done');
+
+            // 6. Cleanup
+            // We keep the file in memory until user leaves step or re-exports?
+            // Better to clean input files now to save memory.
+            try {
+                await ffmpeg.deleteFile('input_video');
+                if (config.includeAudio && audioFile) await ffmpeg.deleteFile('input_audio');
+                await ffmpeg.deleteFile(outputFilename);
+            } catch (cleanupErr) {
+                console.warn('Cleanup warning:', cleanupErr);
+            }
+
+        } catch (e) {
+            console.error('Export failed:', e);
+            setPhase('config');
+            alert(`Dışa aktarım başarısız oldu: ${e instanceof Error ? e.message : 'Bilinmeyen hata'}`);
         }
-
-        // Create a dummy output blob (in a real app, this would be the FFmpeg output)
-        const blob = new Blob([await videoFile.arrayBuffer()], {
-            type: config.format === 'mp4' ? 'video/mp4' : 'video/webm',
-        });
-        const url = URL.createObjectURL(blob);
-
-        setOutputBlob(blob);
-        setOutputUrl(url);
-        setPhase('done');
-    }, [videoFile, config, buildFfmpegArgs]);
+    }, [videoFile, audioFile, config, cuts, syncOffset, isLoaded, ffmpeg]);
 
     /* ── Download ── */
     const handleDownload = useCallback(() => {
@@ -219,6 +201,20 @@ export const Step4Export: React.FC = () => {
                             <ArrowLeft size={16} /> Geri
                         </button>
                     </div>
+
+                    {!isLoaded && (
+                        <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 mb-6 flex items-start gap-3">
+                            <AlertTriangle className="text-yellow-600 shrink-0 mt-0.5" size={20} />
+                            <div>
+                                <h4 className="font-semibold text-yellow-800">FFmpeg Yükleniyor...</h4>
+                                <p className="text-sm text-yellow-700 mt-1">
+                                    Video işleme motoru tarayıcınıza yükleniyor. İlk yükleme internet hızınıza bağlı olarak zaman alabilir.
+                                </p>
+                                {isFfmpegLoading && <Loader2 className="animate-spin mt-2 text-yellow-600" size={20} />}
+                                {ffmpegMessage && <p className="text-sm text-red-600 mt-2">{ffmpegMessage}</p>}
+                            </div>
+                        </div>
+                    )}
 
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                         {/* Left: Settings */}
@@ -396,13 +392,16 @@ export const Step4Export: React.FC = () => {
 
                                 <button
                                     onClick={handleExport}
-                                    className="w-full py-4 px-6 bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold rounded-xl
-                                        hover:from-blue-700 hover:to-indigo-700 shadow-lg shadow-blue-600/30
-                                        active:scale-[0.98] transition-all text-lg"
+                                    disabled={!isLoaded || isFfmpegLoading}
+                                    className={`w-full py-4 px-6 font-semibold rounded-xl text-lg transition-all shadow-lg
+                                        ${isLoaded
+                                            ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:from-blue-700 hover:to-indigo-700 shadow-blue-600/30 active:scale-[0.98]'
+                                            : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                                        }`}
                                 >
                                     <div className="flex items-center justify-center gap-3">
-                                        <Download size={22} />
-                                        Dışa Aktar
+                                        {isFfmpegLoading ? <Loader2 className="animate-spin" size={22} /> : <Download size={22} />}
+                                        {isFfmpegLoading ? 'Yükleniyor...' : 'Dışa Aktar'}
                                     </div>
                                 </button>
                             </div>
