@@ -69,12 +69,12 @@ export const Step3Edit: React.FC = () => {
 
     /* ── WaveSurfer init (audio waveform on timeline) ── */
     useEffect(() => {
-        // Use audioFile if available, otherwise extract audio from videoFile
-        const sourceFile = audioFile ?? videoFile;
-        if (!sourceFile || !waveContainerRef.current) return;
+        // Always use videoFile for waveform — it represents the master timeline.
+        // External audio plays separately but the waveform must match the video's timeline.
+        if (!videoFile || !waveContainerRef.current) return;
         if (wsRef.current) { wsRef.current.destroy(); wsRef.current = null; }
 
-        const url = URL.createObjectURL(sourceFile);
+        const url = URL.createObjectURL(videoFile);
         wsRef.current = WaveSurfer.create({
             container: waveContainerRef.current,
             waveColor: '#818CF8',
@@ -93,7 +93,8 @@ export const Step3Edit: React.FC = () => {
 
         wsRef.current.load(url);
         wsRef.current.on('ready', (d) => {
-            setDuration(d);
+            // Only set duration from WaveSurfer if video hasn't set it yet
+            setDuration(prev => prev > 0 ? prev : d);
             // Read current zoom from ref (not stale closure)
             try { wsRef.current?.zoom(zoomRef.current); } catch { /* */ }
 
@@ -128,7 +129,7 @@ export const Step3Edit: React.FC = () => {
         // Only re-init when source files actually change
         // zoom is handled by separate effect, seekTo via ref
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [audioFile, videoFile]);
+    }, [videoFile]);
 
     /* ── zoom ── */
     useEffect(() => {
@@ -571,24 +572,49 @@ export const Step3Edit: React.FC = () => {
                                 </div>
                             </div>
 
-                            {/* Simple scrubber bar below waveform */}
+                            {/* Scrubber bar with draggable thumb */}
                             <div
-                                className="mt-2 h-2 bg-gray-200 rounded-full cursor-pointer relative overflow-hidden"
+                                className="mt-3 h-2 bg-gray-200 rounded-full cursor-pointer relative group"
                                 onClick={(e) => {
                                     const rect = e.currentTarget.getBoundingClientRect();
-                                    const pct = (e.clientX - rect.left) / rect.width;
+                                    const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
                                     seekTo(pct * duration);
                                 }}
+                                onMouseDown={(e) => {
+                                    e.preventDefault();
+                                    const bar = e.currentTarget;
+                                    const scrub = (ev: MouseEvent) => {
+                                        const rect = bar.getBoundingClientRect();
+                                        const pct = Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width));
+                                        seekTo(pct * duration);
+                                    };
+                                    scrub(e.nativeEvent);
+                                    const onUp = () => {
+                                        document.removeEventListener('mousemove', scrub);
+                                        document.removeEventListener('mouseup', onUp);
+                                    };
+                                    document.addEventListener('mousemove', scrub);
+                                    document.addEventListener('mouseup', onUp);
+                                }}
                             >
+                                {/* Progress fill */}
                                 <div
-                                    className="h-full bg-gradient-to-r from-blue-500 to-indigo-500 rounded-full transition-all duration-100"
+                                    className="h-full bg-gradient-to-r from-blue-500 to-indigo-500 rounded-full pointer-events-none"
                                     style={{ width: `${progressPercent}%` }}
                                 />
+                                {/* Draggable thumb */}
+                                <div
+                                    className="absolute top-1/2 -translate-y-1/2 pointer-events-none z-10"
+                                    style={{ left: `${progressPercent}%` }}
+                                >
+                                    <div className="w-4 h-4 -ml-2 rounded-full bg-blue-600 border-2 border-white shadow-md
+                                        group-hover:scale-125 transition-transform" />
+                                </div>
                                 {/* Cut markers */}
                                 {sortedCuts.map(cut => (
                                     <div
                                         key={cut.id}
-                                        className="absolute top-0 h-full bg-red-500/50"
+                                        className="absolute top-0 h-full bg-red-500/50 pointer-events-none"
                                         style={{
                                             left: `${(cut.start / duration) * 100}%`,
                                             width: `${((cut.end - cut.start) / duration) * 100}%`
