@@ -13,7 +13,7 @@ import {
     getKeepSegments,
 } from '../utils/ffmpegUtils';
 import type { MediaFile, CutSegment } from '../../../app/store/types';
-import { analyzeVideoForShorts } from '../utils/faceTracker';
+import { analyzeVideoForShorts, buildTrajectory } from '../utils/faceTracker';
 import { exportVideoWeb } from '../utils/ffmpegWeb';
 
 interface UseExportProcessProps {
@@ -125,7 +125,10 @@ export function useExportProcess({
                     setProgressLabel('Yüz analizi yapılıyor...');
                     try {
                         const videoSrc = safeConvertFileSrc(masterVideo.path);
-                        const coords = await analyzeVideoForShorts(videoSrc, shortsConfig.startTime ?? 0, shortsConfig.endTime ?? duration, (p: number) => setProgress(p));
+                        // analyzeVideoForShorts returns raw per-frame face boxes; build the
+                        // 9:16 crop trajectory from them (needs the source dimensions).
+                        const faceCache = await analyzeVideoForShorts(videoSrc, shortsConfig.startTime ?? 0, shortsConfig.endTime ?? duration, (p: number) => setProgress(p));
+                        const coords = buildTrajectory(faceCache, [], tempVideo.videoWidth, tempVideo.videoHeight);
                         if (coords && coords.length > 0) {
                             const lines = [];
                             for (let i = 0; i < coords.length; i++) {

@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { analyzeVideoForShorts } from '../utils/faceTracker';
+import { analyzeVideoForShorts, buildTrajectory } from '../utils/faceTracker';
 import type { CropCoordinate } from '../utils/faceTracker';
-import type { MediaFile } from '../../../app/store/types';
+import type { MediaFile, FrameFaces } from '../../../app/store/types';
 import { safeConvertFileSrc } from '../../../shared/utils/tauri';
 import { Loader2, Play, Pause, Check, X } from 'lucide-react';
 
@@ -16,7 +16,8 @@ export const ShortsPreview: React.FC<Props> = ({ masterVideo, enableFaceTracker,
     const [status, setStatus] = useState<'analyzing' | 'preview'>('analyzing');
     const [progress, setProgress] = useState(0);
     const [coordinates, setCoordinates] = useState<CropCoordinate[]>([]);
-    
+    const [frameFaces, setFrameFaces] = useState<FrameFaces[]>([]);
+
     const [isPlaying, setIsPlaying] = useState(true);
     const videoRef = useRef<HTMLVideoElement>(null);
     const cropBoxRef = useRef<HTMLDivElement>(null);
@@ -46,7 +47,7 @@ export const ShortsPreview: React.FC<Props> = ({ masterVideo, enableFaceTracker,
                     }
                 );
                 if (isMounted) {
-                    setCoordinates(coords);
+                    setFrameFaces(coords);
                     setStatus('preview');
                 }
             } catch (err) {
@@ -62,6 +63,25 @@ export const ShortsPreview: React.FC<Props> = ({ masterVideo, enableFaceTracker,
             isMounted = false;
         };
     }, [videoSrc, enableFaceTracker, onCancel]);
+
+    // Build the 9:16 crop trajectory from the raw face frames once the preview
+    // video knows its dimensions (analysis returns face boxes, not crop coords).
+    useEffect(() => {
+        if (status !== 'preview' || !enableFaceTracker || frameFaces.length === 0) return;
+        const video = videoRef.current;
+        if (!video) return;
+        const build = () => {
+            const w = video.videoWidth;
+            const h = video.videoHeight;
+            if (w && h) setCoordinates(buildTrajectory(frameFaces, [], w, h));
+        };
+        if (video.videoWidth) {
+            build();
+        } else {
+            video.addEventListener('loadedmetadata', build, { once: true });
+            return () => video.removeEventListener('loadedmetadata', build);
+        }
+    }, [status, frameFaces, enableFaceTracker]);
 
     // Render loop for the crop box
     useEffect(() => {
