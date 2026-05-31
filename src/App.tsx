@@ -1,4 +1,6 @@
 import React, { useRef, useEffect, useState } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
+import { ArrowLeft, ArrowRight, CheckCircle2 } from 'lucide-react';
 import { MediaUpload } from './features/media-upload';
 import { AudioSync } from './features/audio-sync';
 import { TimelineEdit } from './features/timeline-edit';
@@ -8,9 +10,8 @@ import { VideoExport } from './features/video-export';
 import { useAppStore } from './app/store';
 import { useThumbnailStore } from './store/thumbnailSlice';
 import { captureVideoFrame, capturePreviewContainer } from './shared/utils/captureFrame';
-import { ErrorBoundary } from './shared/ui';
-import { StepBar } from './shared/ui';
-import { CheckCircle2 } from 'lucide-react';
+import { ErrorBoundary, StepBar, Button, ThemeToggle, usePrefersReducedMotion } from './shared/ui';
+import { getStep } from './app/steps';
 
 const StepComponents: Record<number, React.FC<any>> = {
   1: MediaUpload,
@@ -23,24 +24,17 @@ const StepComponents: Record<number, React.FC<any>> = {
 
 function App() {
   const { currentStep, videoFiles, audioFiles, hydrateSession, isExporting } = useAppStore();
-
-  const [displayedStep, setDisplayedStep] = useState(currentStep);
-  const [direction, setDirection] = useState<'left' | 'right'>('right');
-  const [animating, setAnimating] = useState(false);
   const [isHydrated, setIsHydrated] = useState(false);
-  const prevStepRef = useRef(currentStep);
   const masterVideoRef = useRef<HTMLVideoElement>(null);
+  const reducedMotion = usePrefersReducedMotion();
 
   // Monitor store hydration
   useEffect(() => {
     const unsub = useAppStore.persist.onHydrate(() => setIsHydrated(false));
     const unsubFinish = useAppStore.persist.onFinishHydration(() => setIsHydrated(true));
-    
-    // Initial check
     if (useAppStore.persist.hasHydrated()) {
       setIsHydrated(true);
     }
-
     return () => {
       unsub();
       unsubFinish();
@@ -49,11 +43,8 @@ function App() {
 
   useEffect(() => {
     if (!isHydrated) return;
-
-    // Check if we need to hydrate the binary data (Blob URLs)
     const state = useAppStore.getState();
     if (state.videoFiles.length > 0 || state.audioFiles.length > 0) {
-      // If we have metadata but no actual File objects (after refresh), hydrate
       const needsHydration = state.videoFiles.some(vf => !vf.file && !vf.error);
       if (needsHydration) {
         hydrateSession().catch(console.error);
@@ -61,203 +52,109 @@ function App() {
     }
   }, [isHydrated, hydrateSession]);
 
-  useEffect(() => {
-    if (currentStep !== prevStepRef.current) {
-      // Defer state updates to avoid React's set-state-in-effect warning
-      const direction = currentStep > prevStepRef.current ? 'right' : 'left';
+  const Component = StepComponents[currentStep] || MediaUpload;
+  const stepMeta = getStep(currentStep);
 
-      queueMicrotask(() => {
-        setDirection(direction);
-        setAnimating(true);
-      });
-
-      // After exit animation, swap content and do enter animation
-      const timer = setTimeout(() => {
-        setDisplayedStep(currentStep);
-        prevStepRef.current = currentStep;
-        // Short delay to allow the new content to mount before enter animation
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            setAnimating(false);
-          });
-        });
-      }, 200); // matches exit animation duration
-
-      return () => clearTimeout(timer);
+  // Capture the current preview as the thumbnail background when leaving step 3.
+  const capturePreview = () => {
+    const previewEl = document.getElementById('video-preview-container');
+    try {
+      if (previewEl) {
+        useThumbnailStore.getState().setThumbnailBackground(capturePreviewContainer(previewEl));
+        return;
+      }
+    } catch (err) {
+      console.error('Preview capture failed, falling back to master video:', err);
     }
-  }, [currentStep]);
-
-  const Component = StepComponents[displayedStep] || MediaUpload;
-
-  // Animation classes
-  const getTransformClass = () => {
-    if (!animating && displayedStep === currentStep) {
-      return 'translate-x-0 opacity-100';
+    const videoEl = masterVideoRef.current;
+    if (videoEl) {
+      try {
+        useThumbnailStore.getState().setThumbnailBackground(captureVideoFrame(videoEl));
+      } catch (err) {
+        console.error('Auto-capture failed:', err);
+      }
     }
-    if (animating && displayedStep !== currentStep) {
-      // Exiting: slide out
-      return direction === 'right'
-        ? '-translate-x-8 opacity-0'
-        : 'translate-x-8 opacity-0';
-    }
-    // Entering: start from offset
-    return direction === 'right'
-      ? 'translate-x-8 opacity-0'
-      : '-translate-x-8 opacity-0';
   };
 
+  // Data-driven "next" actions (replaces 3 duplicated gradient buttons).
+  const NEXT: Record<number, { label: string; to: number; onBefore?: () => void }> = {
+    3: { label: 'Kapak Tasarla', to: 4, onBefore: capturePreview },
+    4: { label: 'Dışa Aktar', to: 5 },
+    5: { label: 'Shorts Oluştur', to: 6 },
+  };
+  const next = NEXT[currentStep];
+
+  const goBack = () => {
+    const target = currentStep === 3 && videoFiles.length <= 1 && audioFiles.length === 0 ? 1 : currentStep - 1;
+    useAppStore.getState().setStep(target);
+  };
+
+  const isEditor = currentStep === 3;
+
   return (
-    <div className="min-h-screen bg-gray-50 text-gray-900 flex h-screen overflow-hidden">
+    <div className="min-h-screen bg-surface-2 text-text flex h-screen overflow-hidden">
       <div className="flex-1 flex flex-col h-full overflow-hidden relative">
-        <header className="bg-white border-b border-gray-100 shadow-sm sticky top-0 z-[100] flex items-center px-4 h-16">
+        <header className="bg-surface border-b border-border shadow-panel sticky top-0 z-[100] flex items-center px-4 h-16">
           <div className="flex items-center gap-2 mr-6 flex-shrink-0">
-             <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center shadow-lg shadow-blue-600/20">
-                <CheckCircle2 size={20} className="text-white" />
-             </div>
-             <span className="font-black text-xl tracking-tighter text-gray-900">PODCUT</span>
+            <div className="w-8 h-8 rounded-control bg-accent flex items-center justify-center shadow-control">
+              <CheckCircle2 size={20} className="text-accent-fg" />
+            </div>
+            <span className="font-black text-xl tracking-tighter text-text">PODCUT</span>
           </div>
 
-          {/* Dynamic Title based on Step */}
-          <div className="hidden lg:block mr-4 flex-shrink-0 animate-in fade-in slide-in-from-left-4 duration-500 min-w-[140px]">
-            {currentStep === 1 && (
-              <>
-                <h2 className="text-lg font-bold text-gray-900 leading-tight">Medya Yükle</h2>
-                <p className="text-[10px] text-gray-500 font-medium">Dosyalarınızı ekleyin</p>
-              </>
-            )}
-            {currentStep === 2 && (
-              <>
-                <h2 className="text-lg font-bold text-gray-900 leading-tight">Ses Senkronize</h2>
-                <p className="text-[10px] text-gray-500 font-medium">Kamera & Mikrofon eşleme</p>
-              </>
-            )}
-            {currentStep === 3 && (
-              <>
-                <h2 className="text-lg font-bold text-gray-900 leading-tight">Düzenle & Kes</h2>
-                <p className="text-[10px] text-gray-500 font-medium">Kesim noktalarınızı belirleyin</p>
-              </>
-            )}
-            {currentStep === 4 && (
-              <>
-                <h2 className="text-lg font-bold text-gray-900 leading-tight">Kapak Tasarla</h2>
-                <p className="text-[10px] text-gray-500 font-medium">Video görselini hazırlayın</p>
-              </>
-            )}
-            {currentStep === 5 && (
-              <>
-                <h2 className="text-lg font-bold text-gray-900 leading-tight">Dışa Aktar</h2>
-                <p className="text-[10px] text-gray-500 font-medium">Videonuzu kaydedin</p>
-              </>
-            )}
-            {currentStep === 6 && (
-              <>
-                <h2 className="text-lg font-bold text-gray-900 leading-tight">Shorts Oluştur</h2>
-                <p className="text-[10px] text-gray-500 font-medium">Sosyal medya için kes</p>
-              </>
-            )}
-          </div>
+          {/* Dynamic title (single source: app/steps.ts) */}
+          {stepMeta && (
+            <div className="hidden lg:block mr-4 flex-shrink-0 min-w-[140px]">
+              <h2 className="text-lg font-bold text-text leading-tight">{stepMeta.title}</h2>
+              <p className="text-[11px] text-text-muted font-medium">{stepMeta.subtitle}</p>
+            </div>
+          )}
 
           <div className="flex-1 min-w-0">
             <StepBar hideLogo />
           </div>
 
-          <div className="flex items-center gap-3 ml-4 flex-shrink-0 min-w-[200px] justify-end animate-in fade-in slide-in-from-right-4 duration-500">
-            {/* Standardized Back Button (Steps 2-6) */}
+          <div className="flex items-center gap-2 ml-4 flex-shrink-0 justify-end">
+            <ThemeToggle />
+
             {currentStep > 1 && (
-              <button
-                disabled={isExporting}
-                onClick={() => {
-                  const targetStep = currentStep === 3 && videoFiles.length <= 1 && audioFiles.length === 0 ? 1 : currentStep - 1;
-                  useAppStore.getState().setStep(targetStep);
-                }}
-                className={`px-4 py-2 text-sm rounded-xl transition-all font-semibold border shadow-sm active:scale-95
-                  ${isExporting 
-                    ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed opacity-60' 
-                    : 'bg-white text-gray-600 hover:bg-gray-50 border-gray-200'}`}
-              >
-                ← Geri
-              </button>
+              <Button variant="secondary" size="sm" icon={ArrowLeft} disabled={isExporting} onClick={goBack}>
+                Geri
+              </Button>
             )}
 
-            {/* Step-specific Next Buttons */}
-            {currentStep === 3 && (
-              <button
+            {next && (
+              <Button
+                variant="primary"
+                size="sm"
+                iconRight={ArrowRight}
                 disabled={isExporting}
                 onClick={() => {
-                  const previewEl = document.getElementById('video-preview-container');
-                  if (previewEl) {
-                    try {
-                      // Capture the entire layout (including crops, multi-cam)
-                      const base64 = capturePreviewContainer(previewEl);
-                      useThumbnailStore.getState().setThumbnailBackground(base64);
-                    } catch (err) {
-                      console.error("Preview capture failed, falling back to master video:", err);
-                      // Fallback
-                      const videoEl = masterVideoRef.current;
-                      if (videoEl) {
-                        try {
-                          const base64 = captureVideoFrame(videoEl);
-                          useThumbnailStore.getState().setThumbnailBackground(base64);
-                        } catch (fallbackErr) {
-                          console.error("Auto-capture failed:", fallbackErr);
-                        }
-                      }
-                    }
-                  } else {
-                    const videoEl = masterVideoRef.current;
-                    if (videoEl) {
-                      try {
-                        const base64 = captureVideoFrame(videoEl);
-                        useThumbnailStore.getState().setThumbnailBackground(base64);
-                      } catch (err) {
-                        console.error("Auto-capture failed:", err);
-                      }
-                    }
-                  }
-                  useAppStore.getState().setStep(4);
+                  next.onBefore?.();
+                  useAppStore.getState().setStep(next.to);
                 }}
-                className={`px-6 py-2 text-sm font-bold rounded-xl shadow-lg active:scale-[0.98] transition-all
-                  ${isExporting 
-                    ? 'bg-gray-200 text-gray-400 cursor-not-allowed shadow-none' 
-                    : 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:from-blue-700 hover:to-indigo-700 shadow-blue-600/20'}`}
               >
-                Kapak Tasarla →
-              </button>
-            )}
-            {currentStep === 4 && (
-              <button
-                disabled={isExporting}
-                onClick={() => useAppStore.getState().setStep(5)}
-                className={`px-6 py-2 text-sm font-bold rounded-xl shadow-lg active:scale-[0.98] transition-all
-                  ${isExporting 
-                    ? 'bg-gray-200 text-gray-400 cursor-not-allowed shadow-none' 
-                    : 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:from-blue-700 hover:to-indigo-700 shadow-blue-600/20'}`}
-              >
-                Dışa Aktar →
-              </button>
-            )}
-            {currentStep === 5 && (
-              <button
-                disabled={isExporting}
-                onClick={() => useAppStore.getState().setStep(6)}
-                className={`px-6 py-2 text-sm font-bold rounded-xl shadow-lg active:scale-[0.98] transition-all
-                  ${isExporting 
-                    ? 'bg-gray-200 text-gray-400 cursor-not-allowed shadow-none' 
-                    : 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:from-blue-700 hover:to-indigo-700 shadow-blue-600/20'}`}
-              >
-                Shorts Oluştur →
-              </button>
+                {next.label}
+              </Button>
             )}
           </div>
         </header>
 
         <main className="flex-1 overflow-y-auto p-4">
-          <div className="max-w-7xl mx-auto">
-            <div className={`transition-all duration-300 ease-out ${getTransformClass()}`}>
-              <ErrorBoundary>
-                <Component masterVideoRef={masterVideoRef} />
-              </ErrorBoundary>
-            </div>
+          <div className={isEditor ? 'w-full' : 'max-w-7xl mx-auto'}>
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={currentStep}
+                initial={reducedMotion ? { opacity: 0 } : { opacity: 0, x: 16 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={reducedMotion ? { opacity: 0 } : { opacity: 0, x: -16 }}
+                transition={{ duration: 0.2, ease: 'easeOut' }}
+              >
+                <ErrorBoundary>
+                  <Component masterVideoRef={masterVideoRef} />
+                </ErrorBoundary>
+              </motion.div>
+            </AnimatePresence>
           </div>
         </main>
       </div>
