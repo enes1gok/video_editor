@@ -132,7 +132,7 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({
         <div 
             ref={mainPreviewRef}
             id="video-preview-container"
-            className={`bg-black overflow-hidden shadow-xl mb-4 aspect-video relative flex items-center justify-center ${draggingId ? 'cursor-grabbing' : ''}`}
+            className={`bg-black overflow-hidden shadow-panel mb-4 aspect-video relative flex items-center justify-center ${draggingId ? 'cursor-grabbing' : ''}`}
             style={{ borderRadius: `${borderRadius}px` }}
                 onMouseMove={handleMouseMove}
                 onMouseUp={handleMouseUp}
@@ -142,14 +142,16 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({
                     {masterVideo && (
                         <div 
                             data-video-id={masterVideo.id}
-                            className={`group relative ${videoFiles.length > 1 ? 'flex-1 border-r border-gray-800' : 'w-full h-full'} overflow-hidden flex items-center justify-center bg-black ${layoutMode === 'crop' ? 'cursor-grab active:cursor-grabbing' : ''}`}
+                            className={`group relative ${videoFiles.length > 1 ? 'flex-1 border-r border-border-strong' : 'w-full h-full'} overflow-hidden flex items-center justify-center bg-black ${layoutMode === 'crop' ? 'cursor-grab active:cursor-grabbing' : ''}`}
                             style={{ borderRadius: `${borderRadius}px` }}
+                            role={layoutMode === 'crop' ? 'group' : undefined}
+                            aria-label={layoutMode === 'crop' ? 'Ana kamera — sürükleyerek kaydır, tekerlekle yakınlaştır' : undefined}
                             onMouseDown={(e) => handleMouseDown(e, masterVideo)}
                         >
                             {masterVideo.error ? (
                                 <div className="flex flex-col items-center gap-2 p-6 text-center">
-                                    <AlertCircle size={32} className="text-red-500 opacity-50" />
-                                    <p className="text-xs text-gray-500 font-medium max-w-[180px]">
+                                    <AlertCircle size={32} className="text-danger opacity-70" />
+                                    <p className="text-xs text-white/60 font-medium max-w-[180px]">
                                         {masterVideo.error === 'restoration_failed' 
                                             ? 'Dosya geri yüklenemedi. Lütfen tekrar yükleyin.' 
                                             : 'Video yükleme hatası.'}
@@ -192,14 +194,16 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({
                         <div 
                             key={v.id} 
                             data-video-id={v.id}
-                            className={`group relative flex-1 overflow-hidden flex items-center justify-center bg-black border-l border-gray-800 ${layoutMode === 'crop' ? 'cursor-grab active:cursor-grabbing' : ''}`}
+                            className={`group relative flex-1 overflow-hidden flex items-center justify-center bg-black border-l border-border-strong ${layoutMode === 'crop' ? 'cursor-grab active:cursor-grabbing' : ''}`}
                             style={{ borderRadius: `${borderRadius}px` }}
+                            role={layoutMode === 'crop' ? 'group' : undefined}
+                            aria-label={layoutMode === 'crop' ? `${v.name || 'Kamera'} — sürükleyerek kaydır, tekerlekle yakınlaştır` : undefined}
                             onMouseDown={(e) => handleMouseDown(e, v)}
                         >
                             {v.error ? (
                                 <div className="flex flex-col items-center gap-2 p-6 text-center">
-                                    <AlertCircle size={24} className="text-red-500 opacity-40" />
-                                    <p className="text-[10px] text-gray-500 font-medium">HATA</p>
+                                    <AlertCircle size={24} className="text-danger opacity-60" />
+                                    <p className="text-[10px] text-white/60 font-medium">HATA</p>
                                 </div>
                             ) : (
                                 <video

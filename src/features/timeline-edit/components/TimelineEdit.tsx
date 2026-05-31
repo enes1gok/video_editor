@@ -2,6 +2,7 @@ import React, { useRef, useState, useMemo } from 'react';
 import { Plus } from 'lucide-react';
 import { useAppStore } from '../../../app/store';
 import { fmtTime } from '../utils/timeFormat';
+import { Button } from '../../../shared/ui';
 
 import { useMediaUrls } from '../hooks/useMediaUrls';
 import { usePlayback } from '../hooks/usePlayback';
@@ -51,7 +52,7 @@ export const TimelineEdit: React.FC<{ masterVideoRef: React.RefObject<HTMLVideoE
         duration,
     });
 
-    const { zoom, setZoom } = useWaveform({
+    const { zoom, setZoom, zoomToFit } = useWaveform({
         masterVideo,
         mediaUrls,
         waveContainerRef,
@@ -102,7 +103,7 @@ export const TimelineEdit: React.FC<{ masterVideoRef: React.RefObject<HTMLVideoE
 
                 {/* ── Left Sidebar: Controls (Flex Item) ── */}
                 <div className="w-48 shrink-0 flex flex-col gap-4 hidden xl:flex z-50">
-                    <div className="bg-white rounded-2xl shadow-md border border-gray-100 p-4 sticky top-6">
+                    <div className="bg-elevated rounded-card shadow-panel border border-border p-4 sticky top-6">
                         <TransportControls
                             isPlaying={isPlaying}
                             togglePlay={togglePlay}
@@ -114,7 +115,7 @@ export const TimelineEdit: React.FC<{ masterVideoRef: React.RefObject<HTMLVideoE
                             setBorderRadius={setBorderRadius}
                         />
 
-                        <div className="my-4 border-t border-gray-100" />
+                        <div className="my-4 border-t border-border" />
 
                         <CutToolbar
                             markIn={markIn}
@@ -127,7 +128,7 @@ export const TimelineEdit: React.FC<{ masterVideoRef: React.RefObject<HTMLVideoE
                             currentTime={currentTime}
                         />
 
-                        <div className="mt-8 pt-4 border-t border-gray-50 opacity-60">
+                        <div className="mt-8 pt-4 border-t border-border opacity-70">
                             <ShortcutHints />
                         </div>
                     </div>
@@ -136,7 +137,7 @@ export const TimelineEdit: React.FC<{ masterVideoRef: React.RefObject<HTMLVideoE
                 {/* ── Right Content: Preview & Timeline (Flex Item) ── */}
                 <div className="flex-1 min-w-0 flex flex-col gap-6">
                     {/* Fallback for smaller screens */}
-                    <div className="xl:hidden bg-white rounded-2xl shadow-md border border-gray-100 p-4 mb-6 z-50">
+                    <div className="xl:hidden bg-elevated rounded-card shadow-panel border border-border p-4 mb-6 z-50">
                          <div className="flex flex-col gap-4">
                             <TransportControls
                                 isPlaying={isPlaying}
@@ -148,7 +149,7 @@ export const TimelineEdit: React.FC<{ masterVideoRef: React.RefObject<HTMLVideoE
                                 borderRadius={borderRadius}
                                 setBorderRadius={setBorderRadius}
                             />
-                            <div className="border-t border-gray-100 my-2" />
+                            <div className="border-t border-border my-2" />
                             <CutToolbar
                                 markIn={markIn}
                                 handleMarkIn={handleMarkIn}
@@ -164,20 +165,17 @@ export const TimelineEdit: React.FC<{ masterVideoRef: React.RefObject<HTMLVideoE
 
 
                     {videoFiles.length === 0 ? (
-                        <div className="bg-white rounded-3xl border border-dashed border-gray-200 aspect-video flex flex-col items-center justify-center p-12 text-center shadow-sm">
-                            <div className="w-20 h-20 bg-gray-50 rounded-full flex items-center justify-center mb-6">
-                                <Plus size={32} className="text-gray-300" />
+                        <div className="bg-elevated rounded-card border border-dashed border-border aspect-video flex flex-col items-center justify-center p-12 text-center shadow-panel">
+                            <div className="w-20 h-20 bg-surface-2 rounded-full flex items-center justify-center mb-6">
+                                <Plus size={32} className="text-text-muted" />
                             </div>
-                            <h2 className="text-2xl font-bold text-gray-900 mb-3">Hiç video bulunamadı</h2>
-                            <p className="text-gray-500 max-w-sm mb-8 leading-relaxed">
+                            <h2 className="text-2xl font-bold text-text mb-3">Hiç video bulunamadı</h2>
+                            <p className="text-text-2 max-w-sm mb-8 leading-relaxed">
                                 Görünüşe göre bu projede düzenlenecek bir video yok veya videolar geri yüklenemedi.
                             </p>
-                            <button
-                                onClick={() => useAppStore.getState().setStep(1)}
-                                className="px-8 py-3 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-600/20 active:scale-95"
-                            >
+                            <Button size="lg" onClick={() => useAppStore.getState().setStep(1)}>
                                 Medya Yükle adımına dön
-                            </button>
+                            </Button>
                         </div>
                     ) : (
                         <VideoPreview
@@ -201,14 +199,16 @@ export const TimelineEdit: React.FC<{ masterVideoRef: React.RefObject<HTMLVideoE
                         />
                     )}
 
-                    <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-6">
+                    <div className="bg-elevated rounded-card shadow-panel border border-border p-6">
                         <WaveformTimeline
                             waveContainerRef={waveContainerRef}
                             timelineContainerRef={timelineContainerRef}
                             zoom={zoom}
                             setZoom={setZoom}
+                            zoomToFit={zoomToFit}
                             duration={duration}
                             currentTime={currentTime}
+                            isPlaying={isPlaying}
                             sortedCuts={sortedCuts}
                             selectedCut={selectedCut}
                             dragging={dragging}

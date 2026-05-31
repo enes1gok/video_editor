@@ -2,6 +2,7 @@ import React from 'react';
 import { Scissors, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
 import type { CutSegment } from '../../../app/store/types';
 import { fmtTime } from '../utils/timeFormat';
+import { IconButton, Tooltip } from '../../../shared/ui';
 
 interface CutListSidebarProps {
     sortedCuts: CutSegment[];
@@ -22,42 +23,30 @@ export const CutListSidebar: React.FC<CutListSidebarProps> = ({
     removeCut,
     nudgeCutEdge,
 }) => {
+    const removed = cuts.reduce((s, c) => s + (c.end - c.start), 0);
     return (
-        <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-6">
-            <div className="flex items-center justify-between mb-4">
+        <div className="bg-elevated rounded-card shadow-panel border border-border p-6">
+            <div className="flex items-center justify-between mb-4 gap-4 flex-wrap">
                 <div>
-                    <h3 className="text-xl font-bold text-gray-900">Kesim Listesi</h3>
-                    <p className="text-sm text-gray-500">
+                    <h3 className="text-xl font-bold text-text">Kesim Listesi</h3>
+                    <p className="text-sm text-text-2">
                         Çıkarılacak bölümler aşağıda listelenir. Kırmızı bölgeler son videoda olmayacaktır.
                     </p>
                 </div>
                 {sortedCuts.length > 0 && (
-                    <div className="flex gap-6 bg-gray-50 px-4 py-2 rounded-xl border border-gray-100">
-                        <div className="flex flex-col items-center">
-                            <span className="text-[10px] uppercase tracking-wider text-gray-400 font-bold">Kesimler</span>
-                            <span className="text-sm font-bold text-gray-800">{sortedCuts.length}</span>
-                        </div>
-                        <div className="flex flex-col items-center border-l border-gray-200 pl-6">
-                            <span className="text-[10px] uppercase tracking-wider text-gray-400 font-bold">Çıkarılan</span>
-                            <span className="text-sm font-bold text-red-600">
-                                {cuts.reduce((s, c) => s + (c.end - c.start), 0).toFixed(1)}s
-                            </span>
-                        </div>
-                        <div className="flex flex-col items-center border-l border-gray-200 pl-6">
-                            <span className="text-[10px] uppercase tracking-wider text-gray-400 font-bold">Kalan</span>
-                            <span className="text-sm font-bold text-green-600">
-                                {(duration - cuts.reduce((s, c) => s + (c.end - c.start), 0)).toFixed(1)}s
-                            </span>
-                        </div>
+                    <div className="flex gap-6 bg-surface-2 px-4 py-2 rounded-control border border-border">
+                        <Stat label="Kesimler" value={String(sortedCuts.length)} />
+                        <Stat label="Çıkarılan" value={`${removed.toFixed(1)}s`} tone="danger" divider />
+                        <Stat label="Kalan" value={`${(duration - removed).toFixed(1)}s`} tone="success" divider />
                     </div>
                 )}
             </div>
 
             {sortedCuts.length === 0 ? (
-                <div className="text-center py-12 bg-gray-50 rounded-2xl border-2 border-dashed border-gray-200">
-                    <Scissors size={40} className="mx-auto text-gray-300 mb-3" />
-                    <p className="text-lg font-medium text-gray-500">Henüz kesim noktası yok</p>
-                    <p className="text-sm text-gray-400 mt-1 max-w-sm mx-auto">
+                <div className="text-center py-12 bg-surface-2 rounded-card border-2 border-dashed border-border">
+                    <Scissors size={40} className="mx-auto text-text-muted mb-3" />
+                    <p className="text-lg font-medium text-text-2">Henüz kesim noktası yok</p>
+                    <p className="text-sm text-text-muted mt-1 max-w-sm mx-auto">
                         Başlangıç noktası belirleyip, bitiş noktasında "Kes" butonuna basarak videodan bölüm çıkarabilirsiniz.
                     </p>
                 </div>
@@ -80,6 +69,13 @@ export const CutListSidebar: React.FC<CutListSidebarProps> = ({
     );
 };
 
+const Stat: React.FC<{ label: string; value: string; tone?: 'danger' | 'success'; divider?: boolean }> = ({ label, value, tone, divider }) => (
+    <div className={`flex flex-col items-center ${divider ? 'border-l border-border pl-6' : ''}`}>
+        <span className="text-[10px] uppercase tracking-wider text-text-muted font-bold">{label}</span>
+        <span className={`text-sm font-bold ${tone === 'danger' ? 'text-danger' : tone === 'success' ? 'text-success' : 'text-text'}`}>{value}</span>
+    </div>
+);
+
 /* ── Individual Cut Item ── */
 const CutListItem: React.FC<{
     cut: CutSegment;
@@ -91,37 +87,26 @@ const CutListItem: React.FC<{
 }> = ({ cut, index, isSelected, onJump, onRemove, onNudge }) => (
     <div
         onClick={onJump}
-        className={`flex items-center justify-between p-3 rounded-xl cursor-pointer transition-all
-            ${isSelected
-                ? 'bg-red-50 border-2 border-red-300'
-                : 'bg-gray-50 border border-gray-100 hover:bg-gray-100'
-            }`}
+        className={`flex items-center justify-between p-3 rounded-control cursor-pointer transition-all ${
+            isSelected ? 'bg-danger-muted border-2 border-danger' : 'bg-surface-2 border border-border hover:bg-border'
+        }`}
     >
         <div className="flex-1 min-w-0">
-            <span className="text-xs text-gray-400 font-medium">Kesim {index + 1}</span>
+            <span className="text-xs text-text-muted font-medium">Kesim {index + 1}</span>
             <div className="flex items-center gap-1 mt-0.5">
                 <NudgeButton direction="back" onClick={(e) => { e.stopPropagation(); onNudge('start', -0.1); }} title="Başlangıcı 0.1s geri al" />
-                <span className="font-mono text-xs font-semibold text-gray-700 w-12 text-center">
-                    {fmtTime(cut.start)}
-                </span>
+                <span className="font-mono text-xs font-semibold text-text-2 w-12 text-center">{fmtTime(cut.start)}</span>
                 <NudgeButton direction="forward" onClick={(e) => { e.stopPropagation(); onNudge('start', 0.1); }} title="Başlangıcı 0.1s ileri al" />
-                <span className="text-gray-300 mx-0.5">→</span>
+                <span className="text-text-muted mx-0.5">→</span>
                 <NudgeButton direction="back" onClick={(e) => { e.stopPropagation(); onNudge('end', -0.1); }} title="Bitişi 0.1s geri al" />
-                <span className="font-mono text-xs font-semibold text-gray-700 w-12 text-center">
-                    {fmtTime(cut.end)}
-                </span>
+                <span className="font-mono text-xs font-semibold text-text-2 w-12 text-center">{fmtTime(cut.end)}</span>
                 <NudgeButton direction="forward" onClick={(e) => { e.stopPropagation(); onNudge('end', 0.1); }} title="Bitişi 0.1s ileri al" />
             </div>
-            <span className="text-[10px] text-gray-400">
-                {(cut.end - cut.start).toFixed(1)}s süre
-            </span>
+            <span className="text-[10px] text-text-muted">{(cut.end - cut.start).toFixed(1)}s süre</span>
         </div>
-        <button
-            onClick={(e) => { e.stopPropagation(); onRemove(); }}
-            className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-        >
-            <Trash2 size={16} />
-        </button>
+        <Tooltip content="Kesimi sil">
+            <IconButton icon={Trash2} aria-label={`Kesim ${index + 1}'i sil`} variant="danger" size="sm" onClick={(e) => { e.stopPropagation(); onRemove(); }} />
+        </Tooltip>
     </div>
 );
 
@@ -130,11 +115,13 @@ const NudgeButton: React.FC<{
     onClick: (e: React.MouseEvent) => void;
     title: string;
 }> = ({ direction, onClick, title }) => (
-    <button
-        onClick={onClick}
-        className="p-0.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
-        title={title}
-    >
-        {direction === 'back' ? <ChevronLeft size={12} /> : <ChevronRight size={12} />}
-    </button>
+    <Tooltip content={title}>
+        <button
+            onClick={onClick}
+            aria-label={title}
+            className="p-1 text-text-muted hover:text-accent hover:bg-accent-muted rounded transition-colors"
+        >
+            {direction === 'back' ? <ChevronLeft size={12} /> : <ChevronRight size={12} />}
+        </button>
+    </Tooltip>
 );
