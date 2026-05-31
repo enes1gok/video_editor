@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { useToast } from '../../../shared/ui';
 import { Child } from '@tauri-apps/plugin-shell';
 import { save } from '@tauri-apps/plugin-dialog';
 import { writeTextFile, remove, readFile } from '@tauri-apps/plugin-fs';
@@ -33,6 +34,7 @@ export function useExportProcess({
     audioFiles,
     cuts,
 }: UseExportProcessProps) {
+    const toast = useToast();
     const [phase, setPhase] = useState<ExportPhase>('config');
     const [progress, setProgress] = useState(0);
     const [progressLabel, setProgressLabel] = useState('');
@@ -274,14 +276,9 @@ export function useExportProcess({
 
                 fakeProgressInterval = setInterval(() => {
                     if (!hasSeenTime) {
-                       setProgress(p => {
-                           const next = p + 0.1;
-                           if (next >= 0.9) {
-                               childProcessRef.current?.kill().catch(console.error);
-                               return 0.9;
-                           }
-                           return next;
-                       });
+                        setProgress(p => Math.min(p + 0.05, 0.85));
+                    } else {
+                        clearInterval(fakeProgressInterval!);
                     }
                 }, 500);
 
@@ -331,7 +328,7 @@ export function useExportProcess({
             console.error('Export failed:', e);
             setPhase('config');
             const message = e instanceof Error ? e.message : String(e);
-            alert(`Dışa aktarım başarısız oldu:\n\n${message}`);
+            toast.error(`Dışa aktarım başarısız oldu: ${message}`);
         } finally {
             if (fakeProgressInterval) clearInterval(fakeProgressInterval);
             childProcessRef.current = null;

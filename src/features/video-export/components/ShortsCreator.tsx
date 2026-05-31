@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
+import { useToast } from '../../../shared/ui';
 import { useAppStore } from '../../../app/store';
 import { analyzeVideoForShorts, interpolateCrop, buildTrajectory } from '../utils/faceTracker';
 import type { CropCoordinate } from '../utils/faceTracker';
@@ -24,6 +25,7 @@ function revokeBlobUrl(url: string | undefined) {
 }
 
 export const ShortsCreator: React.FC = () => {
+    const toast = useToast();
     const { shortsConfig, setShortsConfig } = useAppStore();
     const clips = shortsConfig?.clips || [];
 
@@ -70,6 +72,7 @@ export const ShortsCreator: React.FC = () => {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const rafRef = useRef<number | null>(null);
     const abortControllerRef = useRef<AbortController | null>(null);
+    const captionIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
     // Forces a re-render when video time updates so the director overlay can grab the right cache frame
     const [, setForceRender] = useState(0);
@@ -168,7 +171,7 @@ export const ShortsCreator: React.FC = () => {
             }
         } catch (err) {
             console.error('File selection failed:', err);
-            alert('Dosya seçimi başarısız oldu: ' + err);
+            toast.error('Dosya seçimi başarısız oldu: ' + err);
         }
     };
 
@@ -306,7 +309,7 @@ export const ShortsCreator: React.FC = () => {
         } catch (err) {
             if (err instanceof Error && err.message === 'Aborted') return;
             console.error('Analysis failed:', err);
-            alert('Yüz analizi başarısız oldu: ' + err);
+            toast.error('Yüz analizi başarısız oldu: ' + err);
             setEnableFaceTracker(false);
             setStatus('idle');
         }
@@ -387,9 +390,9 @@ export const ShortsCreator: React.FC = () => {
                                 return prev + (Math.random() * 2);
                             });
                         }, 800);
-                        (worker as any)._interval = interval;
+                        captionIntervalRef.current = interval;
                     } else if (e.data.status === 'done') {
-                        if ((worker as any)._interval) clearInterval((worker as any)._interval);
+                        if (captionIntervalRef.current) { clearInterval(captionIntervalRef.current); captionIntervalRef.current = null; }
                         setCaptionFileName('Altyazılar yerleştiriliyor...');
                         setCaptionProgress(100);
                         setCaptionChunks(e.data.chunks || []);
@@ -413,7 +416,7 @@ export const ShortsCreator: React.FC = () => {
                             resolve();
                         }, 500);
                     } else if (e.data.status === 'error') {
-                        if ((worker as any)._interval) clearInterval((worker as any)._interval);
+                        if (captionIntervalRef.current) { clearInterval(captionIntervalRef.current); captionIntervalRef.current = null; }
                         console.error('[Caption] Worker error:', e.data.error);
                         worker.terminate();
                         reject(new Error(e.data.error));
@@ -430,7 +433,7 @@ export const ShortsCreator: React.FC = () => {
             }
         } catch (err) {
             console.error('[Caption] Error:', err);
-            alert("Altyazı oluşturulamadı: " + err);
+            toast.error("Altyazı oluşturulamadı: " + err);
             setEnableCaptions(false);
             setCaptionStatus('idle');
         }
@@ -646,10 +649,10 @@ export const ShortsCreator: React.FC = () => {
                 URL.revokeObjectURL(url);
             }
 
-            alert('Short başarıyla dışa aktarıldı!');
+            toast.success('Short başarıyla dışa aktarıldı!');
         } catch (err) {
             console.error('Export failed:', err);
-            alert('Dışa aktarım hatası: ' + (err instanceof Error ? err.message : String(err)));
+            toast.error('Dışa aktarım hatası: ' + (err instanceof Error ? err.message : String(err)));
         } finally {
             setExportingClipId(null);
             setExportProgress(0);

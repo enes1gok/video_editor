@@ -53,8 +53,11 @@ export function useCutDrag({
             }));
         };
 
+        let pendingRaf: number | null = null;
         const onMove = (ev: MouseEvent) => {
-            requestAnimationFrame(() => updateTime(ev.clientX));
+            if (pendingRaf !== null) cancelAnimationFrame(pendingRaf);
+            const x = ev.clientX;
+            pendingRaf = requestAnimationFrame(() => { pendingRaf = null; updateTime(x); });
         };
 
         const onUp = () => {

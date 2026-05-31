@@ -4,6 +4,7 @@ import type { CropCoordinate } from '../utils/faceTracker';
 import type { MediaFile, FrameFaces } from '../../../app/store/types';
 import { safeConvertFileSrc } from '../../../shared/utils/tauri';
 import { Loader2, Play, Pause, Check, X } from 'lucide-react';
+import { useToast } from '../../../shared/ui';
 
 interface Props {
     masterVideo: MediaFile;
@@ -13,6 +14,7 @@ interface Props {
 }
 
 export const ShortsPreview: React.FC<Props> = ({ masterVideo, enableFaceTracker, onConfirm, onCancel }) => {
+    const toast = useToast();
     const [status, setStatus] = useState<'analyzing' | 'preview'>('analyzing');
     const [progress, setProgress] = useState(0);
     const [coordinates, setCoordinates] = useState<CropCoordinate[]>([]);
@@ -52,7 +54,7 @@ export const ShortsPreview: React.FC<Props> = ({ masterVideo, enableFaceTracker,
                 }
             } catch (err) {
                 console.error("Face analysis failed:", err);
-                alert("Yüz analizi başarısız oldu: " + err);
+                toast.error("Yüz analizi başarısız oldu: " + err);
                 if (isMounted) onCancel();
             }
         };

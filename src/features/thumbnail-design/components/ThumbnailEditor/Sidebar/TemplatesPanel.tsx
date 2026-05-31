@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Layout, Sparkles, AlertTriangle } from 'lucide-react';
 import { useThumbnailStore, type ThumbnailObject } from '../../../../../store/thumbnailSlice';
+import { Modal, Button } from '../../../../../shared/ui';
 
 interface TemplateDef {
   name: string;
@@ -90,17 +91,30 @@ const TEMPLATES: TemplateDef[] = [
 
 export const TemplatesPanel: React.FC = () => {
   const { loadTemplate, thumbnailObjects } = useThumbnailStore();
+  const [pendingTemplate, setPendingTemplate] = useState<TemplateDef | null>(null);
 
   const handleLoad = (template: TemplateDef) => {
     if (thumbnailObjects.length > 0) {
-      if (!window.confirm('Mevcut tasarımınız silinecek ve şablon yüklenecek. Onaylıyor musunuz?')) {
-        return;
-      }
+      setPendingTemplate(template);
+    } else {
+      loadTemplate(template.objects as ThumbnailObject[]);
     }
-    loadTemplate(template.objects as ThumbnailObject[]);
+  };
+
+  const handleConfirmLoad = () => {
+    if (pendingTemplate) loadTemplate(pendingTemplate.objects as ThumbnailObject[]);
+    setPendingTemplate(null);
   };
 
   return (
+    <>
+    <Modal open={!!pendingTemplate} onClose={() => setPendingTemplate(null)} title="Şablon Yükle" width={400}>
+      <p className="text-text-2 text-sm mb-6">Mevcut tasarımınız silinecek ve şablon yüklenecek. Onaylıyor musunuz?</p>
+      <div className="flex justify-end gap-2">
+        <Button variant="secondary" size="sm" onClick={() => setPendingTemplate(null)}>İptal</Button>
+        <Button variant="primary" size="sm" onClick={handleConfirmLoad}>Yükle</Button>
+      </div>
+    </Modal>
     <div className="flex flex-col gap-4 p-1">
       <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl flex gap-3 items-start">
         <Sparkles className="w-5 h-5 text-blue-400 shrink-0 mt-0.5" />
@@ -134,5 +148,6 @@ export const TemplatesPanel: React.FC = () => {
         <span className="text-[10px] text-slate-500 italic">Daha fazla şablon yakında...</span>
       </div>
     </div>
+    </>
   );
 };
