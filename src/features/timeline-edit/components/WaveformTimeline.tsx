@@ -1,11 +1,12 @@
 import React, { useMemo, useEffect } from 'react';
-import { ZoomIn, ZoomOut, GripVertical } from 'lucide-react';
+import { ZoomIn, ZoomOut, Maximize2, GripVertical } from 'lucide-react';
 import type { CutSegment } from '../../../app/store/types';
 import { fmtTime } from '../utils/timeFormat';
+import { IconButton, Tooltip } from '../../../shared/ui';
 
 interface WaveformTimelineProps {
     waveContainerRef: React.RefObject<HTMLDivElement | null>;
-    timelineContainerRef: React.RefObject<HTMLDivElement | null>; // New ref for the scrollable container
+    timelineContainerRef: React.RefObject<HTMLDivElement | null>;
     zoom: number; // pixels per second
     setZoom: React.Dispatch<React.SetStateAction<number>>;
     duration: number;
@@ -16,6 +17,22 @@ interface WaveformTimelineProps {
     handleEdgeDrag: (e: React.MouseEvent, cutId: string, edge: 'start' | 'end') => void;
     jumpToCut: (cut: CutSegment) => void;
     seekTo: (t: number) => void;
+    isPlaying?: boolean;
+    zoomToFit?: () => void;
+}
+
+const MIN_ZOOM = 10;
+const MAX_ZOOM = 2000;
+const RULER_H = 22;
+const WAVE_H = 90;
+
+const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+
+/** Pick a "nice" tick interval (seconds) so major ticks sit ~90px apart. */
+function niceStep(zoom: number): number {
+    const target = 90 / zoom; // seconds per ~90px
+    const steps = [0.25, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1800];
+    return steps.find((s) => s >= target) ?? 3600;
 }
 
 export const WaveformTimeline: React.FC<WaveformTimelineProps> = ({
@@ -31,13 +48,22 @@ export const WaveformTimeline: React.FC<WaveformTimelineProps> = ({
     handleEdgeDrag,
     jumpToCut,
     seekTo,
+    isPlaying,
+    zoomToFit,
 }) => {
-    // Unified Coordinate System Utilities
     const timeToPixels = (t: number) => t * zoom;
     const pixelsToTime = (px: number) => px / zoom;
 
     const totalWidth = useMemo(() => duration * zoom, [duration, zoom]);
     const playheadLeft = useMemo(() => timeToPixels(currentTime), [currentTime, zoom]);
+
+    const ticks = useMemo(() => {
+        if (duration <= 0) return [];
+        const step = niceStep(zoom);
+        const arr: number[] = [];
+        for (let t = 0; t <= duration + 1e-6; t += step) arr.push(Number(t.toFixed(3)));
+        return arr;
+    }, [duration, zoom]);
 
     const handleScrubStart = (e: React.MouseEvent) => {
         e.preventDefault();
@@ -54,105 +80,120 @@ export const WaveformTimeline: React.FC<WaveformTimelineProps> = ({
         };
         document.addEventListener('mousemove', onMove);
         document.addEventListener('mouseup', onUp);
-        // Trigger initial move
         onMove(e.nativeEvent);
     };
 
-    // Auto-scroll playhead into view if it goes out of bounds while playing
+    // Keep the playhead in view while playing (the previous effect was a no-op).
+    useEffect(() => {
+        const container = timelineContainerRef.current;
+        if (!container || !isPlaying) return;
+        const margin = 80;
+        const left = container.scrollLeft;
+        const right = left + container.clientWidth;
+        if (playheadLeft > right - margin || playheadLeft < left) {
+            container.scrollLeft = Math.max(0, playheadLeft - container.clientWidth * 0.2);
+        }
+    }, [playheadLeft, isPlaying, timelineContainerRef]);
+
+    // Ctrl/Cmd + wheel zooms anchored at the cursor (native listener so we can
+    // preventDefault the browser page-zoom).
     useEffect(() => {
         const container = timelineContainerRef.current;
         if (!container) return;
-
-        const margin = 100; // px
-        const leftBound = container.scrollLeft;
-        const rightBound = container.scrollLeft + container.clientWidth;
-
-        if (playheadLeft > rightBound - margin || playheadLeft < leftBound + margin) {
-            // Only auto-scroll if it's playing or near the edges
-            // We don't want to fight the user's manual scrolling too much
-        }
-    }, [playheadLeft, timelineContainerRef]);
+        const onWheel = (e: WheelEvent) => {
+            if (!(e.ctrlKey || e.metaKey)) return;
+            e.preventDefault();
+            const rect = container.getBoundingClientRect();
+            const cursorOffset = e.clientX - rect.left;
+            const timeAtCursor = (cursorOffset + container.scrollLeft) / zoom;
+            const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+            const newZoom = clamp(zoom * factor, MIN_ZOOM, MAX_ZOOM);
+            setZoom(newZoom);
+            requestAnimationFrame(() => {
+                container.scrollLeft = timeAtCursor * newZoom - cursorOffset;
+            });
+        };
+        container.addEventListener('wheel', onWheel, { passive: false });
+        return () => container.removeEventListener('wheel', onWheel);
+    }, [zoom, setZoom, timelineContainerRef]);
 
     return (
         <div className="relative select-none">
-            {/* Zoom controls */}
+            {/* Toolbar: timecode + zoom */}
             <div className="flex items-center justify-between mb-3 px-1">
-                <div className="text-xs font-medium text-gray-500 flex items-center gap-2">
-                    <span className="bg-gray-100 px-2 py-0.5 rounded font-mono">{fmtTime(currentTime)}</span>
-                    <span className="text-gray-300">/</span>
-                    <span className="text-gray-400 font-mono">{fmtTime(duration)}</span>
+                <div className="text-xs font-medium flex items-center gap-2">
+                    <span className="bg-surface-2 text-text px-2 py-0.5 rounded-md font-mono">{fmtTime(currentTime)}</span>
+                    <span className="text-text-muted">/</span>
+                    <span className="text-text-muted font-mono">{fmtTime(duration)}</span>
                 </div>
-                <div className="flex items-center gap-2">
-                    <button 
-                        onClick={() => setZoom(z => Math.max(10, z * 0.8))} 
-                        className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors text-gray-600"
-                        title="Zoom Out"
-                    >
-                        <ZoomOut size={16} />
-                    </button>
-                    <div className="h-4 w-px bg-gray-200 mx-1" />
-                    <button 
-                        onClick={() => setZoom(z => Math.min(2000, z * 1.2))} 
-                        className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors text-gray-600"
-                        title="Zoom In"
-                    >
-                        <ZoomIn size={16} />
-                    </button>
-                    <span className="text-[10px] font-mono text-gray-400 min-w-[40px] text-right">
-                        {Math.round(zoom)}px/s
-                    </span>
+                <div className="flex items-center gap-1">
+                    <Tooltip content="Uzaklaştır">
+                        <IconButton icon={ZoomOut} aria-label="Uzaklaştır" size="sm" onClick={() => setZoom((z) => clamp(z * 0.8, MIN_ZOOM, MAX_ZOOM))} />
+                    </Tooltip>
+                    <Tooltip content="Ekrana sığdır">
+                        <IconButton icon={Maximize2} aria-label="Ekrana sığdır" size="sm" onClick={() => zoomToFit?.()} />
+                    </Tooltip>
+                    <Tooltip content="Yakınlaştır · Ctrl+tekerlek">
+                        <IconButton icon={ZoomIn} aria-label="Yakınlaştır" size="sm" onClick={() => setZoom((z) => clamp(z * 1.2, MIN_ZOOM, MAX_ZOOM))} />
+                    </Tooltip>
+                    <span className="text-[10px] font-mono text-text-muted min-w-[44px] text-right">{Math.round(zoom)}px/s</span>
                 </div>
             </div>
 
-            {/* Main Unified Scroll Container */}
-            <div 
+            {/* Scroll container */}
+            <div
                 ref={timelineContainerRef}
-                className="bg-white rounded-xl border border-gray-200 relative shadow-sm overflow-x-auto overflow-y-hidden scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent h-[140px]"
+                className="bg-timeline-bg rounded-card border border-border relative shadow-panel overflow-x-auto overflow-y-hidden scrollbar-thin"
+                style={{ height: RULER_H + WAVE_H + 52 }}
             >
-                {/* Content Wrapper (Duration-based width) */}
-                <div 
-                    style={{ width: totalWidth || '100%', height: '100%', position: 'relative' }}
-                    className="min-w-full"
-                >
-                    {/* Waveform Layer */}
-                    <div 
-                        ref={waveContainerRef} 
-                        className="absolute top-0 left-0 w-full h-[80px] opacity-80" 
-                    />
+                <div style={{ width: totalWidth || '100%', height: '100%', position: 'relative' }} className="min-w-full">
+                    {/* Ruler: grid lines (full height) + labels */}
+                    <div className="absolute inset-0 pointer-events-none z-0">
+                        {ticks.map((t) => {
+                            const left = timeToPixels(t);
+                            return (
+                                <React.Fragment key={t}>
+                                    <div className="absolute bg-timeline-grid opacity-40" style={{ left, top: RULER_H, bottom: 0, width: 1 }} />
+                                    <span className="absolute top-1 text-[10px] font-mono text-text-muted leading-none whitespace-nowrap" style={{ left: left + 3 }}>
+                                        {fmtTime(t)}
+                                    </span>
+                                </React.Fragment>
+                            );
+                        })}
+                    </div>
 
-                    {/* Interaction & Marking Layer (Translucent background for the ruler area) */}
-                    <div 
-                        className="absolute bottom-0 left-0 w-full h-[60px] bg-slate-50/30 border-t border-gray-100 cursor-pointer"
+                    {/* Waveform */}
+                    <div ref={waveContainerRef} className="absolute left-0 w-full opacity-90 z-10" style={{ top: RULER_H, height: WAVE_H }} />
+
+                    {/* Scrub band (below waveform) + ruler click-to-seek */}
+                    <div
+                        className="absolute left-0 w-full cursor-pointer z-0"
+                        style={{ top: 0, height: RULER_H }}
+                        onMouseDown={handleScrubStart}
+                    />
+                    <div
+                        className="absolute left-0 w-full bg-surface-2/30 border-t border-border cursor-pointer z-0"
+                        style={{ top: RULER_H + WAVE_H, bottom: 0 }}
                         onMouseDown={handleScrubStart}
                     />
 
-                    {/* Cut regions overlay */}
-                    <div className="absolute top-0 left-0 w-full h-full pointer-events-none">
-                        {duration > 0 && sortedCuts.map(cut => {
+                    {/* Cut regions */}
+                    <div className="absolute left-0 w-full pointer-events-none z-20" style={{ top: RULER_H, height: WAVE_H }}>
+                        {duration > 0 && sortedCuts.map((cut) => {
                             const left = timeToPixels(cut.start);
                             const width = timeToPixels(cut.end - cut.start);
                             const isActive = selectedCut === cut.id;
                             const isDraggingThis = dragging?.cutId === cut.id;
-                            const isDraggingStart = isDraggingThis && dragging?.edge === 'start';
-                            const isDraggingEnd = isDraggingThis && dragging?.edge === 'end';
-
                             return (
                                 <div
                                     key={cut.id}
-                                    className="absolute top-0 cursor-pointer pointer-events-auto group/cut"
+                                    className="absolute top-0 h-full cursor-pointer pointer-events-auto group/cut border-x-2 transition-[background,box-shadow] duration-150"
                                     style={{
                                         left,
                                         width,
-                                        height: 80, // Same as waveform height
-                                        background: isDraggingThis
-                                            ? 'rgba(239,68,68,0.4)'
-                                            : isActive ? 'rgba(239,68,68,0.3)' : 'rgba(239,68,68,0.15)',
-                                        borderLeft: '2px solid rgb(239,68,68)',
-                                        borderRight: '2px solid rgb(239,68,68)',
-                                        boxShadow: isDraggingThis
-                                            ? '0 0 12px rgba(239,68,68,0.4)'
-                                            : isActive ? '0 0 0 1px rgba(239,68,68,0.5)' : undefined,
-                                        transition: isDraggingThis ? 'none' : 'background 0.2s, box-shadow 0.2s',
+                                        background: isDraggingThis || isActive ? 'var(--cut-fill-active)' : 'var(--cut-fill)',
+                                        borderColor: 'var(--cut-border)',
+                                        boxShadow: isActive ? '0 0 0 1px var(--cut-border)' : undefined,
                                         zIndex: isActive ? 10 : 5,
                                     }}
                                     onClick={(e) => {
@@ -160,57 +201,26 @@ export const WaveformTimeline: React.FC<WaveformTimelineProps> = ({
                                         jumpToCut(cut);
                                     }}
                                 >
-                                    {/* Left drag handle */}
-                                    <DragHandle
-                                        side="left"
-                                        isActive={isDraggingStart}
-                                        onMouseDown={(e) => handleEdgeDrag(e, cut.id, 'start')}
-                                        time={isDraggingStart ? fmtTime(cut.start) : undefined}
-                                    />
-                                    {/* Right drag handle */}
-                                    <DragHandle
-                                        side="right"
-                                        isActive={isDraggingEnd}
-                                        onMouseDown={(e) => handleEdgeDrag(e, cut.id, 'end')}
-                                        time={isDraggingEnd ? fmtTime(cut.end) : undefined}
-                                    />
-
-                                    {/* Cut Label */}
-                                    <div className="absolute bottom-1 left-2 text-[10px] font-medium text-red-600 opacity-0 group-hover/cut:opacity-100 transition-opacity whitespace-nowrap">
-                                        {fmtTime(cut.end - cut.start)} segment
+                                    <DragHandle side="left" isActive={isDraggingThis && dragging?.edge === 'start'} onMouseDown={(e) => handleEdgeDrag(e, cut.id, 'start')} time={isDraggingThis && dragging?.edge === 'start' ? fmtTime(cut.start) : undefined} />
+                                    <DragHandle side="right" isActive={isDraggingThis && dragging?.edge === 'end'} onMouseDown={(e) => handleEdgeDrag(e, cut.id, 'end')} time={isDraggingThis && dragging?.edge === 'end' ? fmtTime(cut.end) : undefined} />
+                                    <div className="absolute bottom-1 left-2 text-[10px] font-semibold text-danger opacity-0 group-hover/cut:opacity-100 transition-opacity whitespace-nowrap">
+                                        {fmtTime(cut.end - cut.start)}
                                     </div>
                                 </div>
                             );
                         })}
                     </div>
 
-                    {/* Scrubber Tick Marks (Optional decoration) */}
-                    <div className="absolute bottom-[20px] left-0 w-full h-[1px] bg-gray-200 pointer-events-none" />
-
-                    {/* Playhead (Line and Thumb) */}
-                    <div
-                        className="absolute top-0 h-full pointer-events-none z-30 transition-shadow"
-                        style={{
-                            left: playheadLeft,
-                            width: 1,
-                            background: '#0F172A',
-                        }}
-                    >
-                        {/* Playhead vertical line */}
-                        <div className="w-px h-full bg-slate-900 shadow-[0_0_8px_rgba(15,23,42,0.4)]" />
-                        
-                        {/* Playhead handle / thumb at the bottom */}
-                        <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-3 h-6 bg-slate-900 rounded-t-sm clip-path-playhead flex items-center justify-center">
-                            <div className="w-0.5 h-3 bg-white/30 rounded-full" />
+                    {/* Playhead */}
+                    <div className="absolute top-0 h-full pointer-events-none z-30" style={{ left: playheadLeft, width: 2, background: 'var(--playhead)' }}>
+                        {/* Time chip */}
+                        <div className="absolute -top-0 left-1 px-1 py-0.5 rounded bg-playhead text-timeline-bg text-[10px] font-mono leading-none whitespace-nowrap">
+                            {fmtTime(currentTime)}
                         </div>
+                        {/* Triangular head */}
+                        <div className="absolute left-1/2 -translate-x-1/2 w-3 h-2.5 bg-playhead clip-path-playhead" style={{ top: RULER_H - 2 }} />
                     </div>
                 </div>
-            </div>
-
-            {/* Bottom context markers (mini overall scrubber if needed, but the main one is zoomable now) */}
-            <div className="mt-2 flex justify-between px-1">
-                <span className="text-[10px] text-gray-400">Total: {fmtTime(duration)}</span>
-                <span className="text-[10px] text-gray-400">Zoom: {zoom.toFixed(0)}px/s</span>
             </div>
         </div>
     );
@@ -224,28 +234,25 @@ const DragHandle: React.FC<{
     time?: string;
 }> = ({ side, isActive, onMouseDown, time }) => (
     <div
+        // Wide invisible grab zone, slim visible handle inside (bigger hit target).
         className="absolute top-0 h-full cursor-col-resize z-20 flex items-center justify-center group/handle"
-        style={{
-            [side === 'left' ? 'left' : 'right']: -8,
-            width: 16,
-            pointerEvents: 'auto',
-        }}
+        style={{ [side === 'left' ? 'left' : 'right']: -8, width: 16, pointerEvents: 'auto' }}
         onMouseDown={(e) => {
             e.stopPropagation();
             onMouseDown(e);
         }}
     >
-        <div className={`
-            h-1/2 w-1.5 rounded-full transition-all flex items-center justify-center
-            ${isActive ? 'bg-red-600 scale-x-125 h-2/3' : 'bg-red-400/80 group-hover/handle:bg-red-500 group-hover/handle:h-2/3'}
-        `}>
-            <GripVertical size={10} className="text-white opacity-60" />
+        <div
+            className={`h-1/2 w-1.5 rounded-full transition-all flex items-center justify-center ${
+                isActive ? 'h-2/3 scale-x-125' : 'group-hover/handle:h-2/3'
+            }`}
+            style={{ background: 'var(--cut-border)' }}
+        >
+            <GripVertical size={10} className="text-white opacity-70" />
         </div>
-
         {time && (
-            <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-[10px] font-mono px-2 py-0.5 rounded-md shadow-xl z-40 animate-in fade-in zoom-in duration-200">
+            <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-text text-surface text-[10px] font-mono px-2 py-0.5 rounded-md shadow-popover z-40 whitespace-nowrap">
                 {time}
-                <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-gray-900 rotate-45" />
             </div>
         )}
     </div>

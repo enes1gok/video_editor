@@ -13,10 +13,12 @@ export interface PopoverProps {
     align?: 'start' | 'end';
     width?: number;
     className?: string;
+    /** Class for the trigger wrapper (e.g. "flex w-full" for a full-width trigger). */
+    triggerClassName?: string;
 }
 
 /** Anchored floating panel with focus-trap, Escape and click-outside to close. */
-export const Popover: React.FC<PopoverProps> = ({ trigger, children, align = 'start', width = 320, className }) => {
+export const Popover: React.FC<PopoverProps> = ({ trigger, children, align = 'start', width = 320, className, triggerClassName }) => {
     const [open, setOpen] = useState(false);
     const [rect, setRect] = useState<DOMRect | null>(null);
     const anchorRef = useRef<HTMLSpanElement>(null);
@@ -55,7 +57,7 @@ export const Popover: React.FC<PopoverProps> = ({ trigger, children, align = 'st
 
     return (
         <>
-            <span ref={anchorRef} className="inline-flex" onClick={toggle}>
+            <span ref={anchorRef} className={cn('inline-flex', triggerClassName)} onClick={toggle}>
                 {trigger}
             </span>
             {createPortal(

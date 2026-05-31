@@ -1,8 +1,9 @@
 import {
     Play, Pause, ChevronLeft, ChevronRight,
-    SkipBack, SkipForward, LayoutTemplate, RectangleHorizontal
+    SkipBack, SkipForward, LayoutTemplate, RectangleHorizontal, Squircle
 } from 'lucide-react';
 import type { LayoutMode } from '../../../app/store/types';
+import { IconButton, SegmentedControl, RangeField, Tooltip, Kbd } from '../../../shared/ui';
 
 interface TransportControlsProps {
     isPlaying: boolean;
@@ -27,74 +28,60 @@ export const TransportControls: React.FC<TransportControlsProps> = ({
 }) => {
     return (
         <div className="flex flex-col gap-4 items-center w-full">
-            {/* Layout Toggle */}
-            <div className="w-full">
-                {hasMultipleVideos && (
-                    <div className="flex flex-col gap-1 bg-gray-50 p-1 rounded-xl border border-gray-200">
-                        <button
-                            onClick={() => setLayoutMode('scale')}
-                            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] transition-all ${layoutMode === 'scale' ? 'bg-white text-blue-600 shadow-sm font-bold' : 'text-gray-500 hover:text-gray-700'}`}
-                            title="Orijinal (Boşluklu)"
-                        >
-                            <LayoutTemplate size={12} /> <span>Orijinal</span>
-                        </button>
-                        <button
-                            onClick={() => setLayoutMode('crop')}
-                            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] transition-all ${layoutMode === 'crop' ? 'bg-white text-blue-600 shadow-sm font-bold' : 'text-gray-500 hover:text-gray-700'}`}
-                            title="Kırpılmış (Tam Ekran)"
-                        >
-                            <LayoutTemplate size={12} className="rotate-90" /> <span>Kırpılmış</span>
-                        </button>
-                    </div>
-                )}
-            </div>
-
-            {/* Rounded Corners Slider */}
-            <div className="w-full">
-                <label className="flex items-center justify-between text-[10px] text-gray-500 mb-1 font-medium">
-                    <span className="flex items-center gap-1">
-                        <RectangleHorizontal size={11} className="text-gray-400" />
-                        Köşe Yuvarlama
-                    </span>
-                    <span className="font-mono text-gray-700">{borderRadius}px</span>
-                </label>
-                <input
-                    type="range"
-                    min={0}
-                    max={50}
-                    step={1}
-                    value={borderRadius}
-                    onChange={e => setBorderRadius(Number(e.target.value))}
-                    className="w-full accent-blue-600 h-1.5 rounded-full cursor-pointer"
+            {/* Layout mode */}
+            {hasMultipleVideos && (
+                <SegmentedControl<LayoutMode>
+                    fullWidth
+                    size="sm"
+                    aria-label="Yerleşim modu"
+                    value={layoutMode}
+                    onChange={setLayoutMode}
+                    options={[
+                        { value: 'scale', label: 'Orijinal', icon: LayoutTemplate, title: 'Orijinal (boşluklu)' },
+                        { value: 'crop', label: 'Kırpılmış', icon: RectangleHorizontal, title: 'Kırpılmış (tam ekran)' },
+                    ]}
                 />
-            </div>
+            )}
 
-            {/* Playback Controls */}
-            <div className="flex flex-col items-center gap-2 w-full">
-                <div className="flex items-center gap-2">
-                    <button onClick={() => skip(-5)} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors text-gray-400" title="-5s">
-                        <SkipBack size={16} />
-                    </button>
-                    <button onClick={() => skip(-1)} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors text-gray-400" title="-1s">
-                        <ChevronLeft size={16} />
-                    </button>
-                    <button
+            {/* Rounded corners */}
+            <RangeField
+                label="Köşe Yuvarlama"
+                icon={Squircle}
+                value={borderRadius}
+                onChange={setBorderRadius}
+                min={0}
+                max={50}
+                step={1}
+                suffix="px"
+                aria-label="Köşe yuvarlama yarıçapı"
+            />
+
+            {/* Playback transport */}
+            <div className="flex items-center gap-1.5">
+                <Tooltip content="5 sn geri · J">
+                    <IconButton icon={SkipBack} aria-label="5 saniye geri" size="sm" onClick={() => skip(-5)} />
+                </Tooltip>
+                <Tooltip content="1 sn geri · ←">
+                    <IconButton icon={ChevronLeft} aria-label="1 saniye geri" size="sm" onClick={() => skip(-1)} />
+                </Tooltip>
+                <Tooltip content={isPlaying ? 'Duraklat · Space' : 'Oynat · Space'}>
+                    <IconButton
+                        icon={isPlaying ? Pause : Play}
+                        aria-label={isPlaying ? 'Duraklat' : 'Oynat'}
+                        variant="solid"
+                        size="lg"
                         onClick={togglePlay}
-                        className="p-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl shadow-md shadow-blue-600/20 hover:shadow-lg active:scale-95 transition-all"
-                    >
-                        {isPlaying ? <Pause size={20} /> : <Play size={20} />}
-                    </button>
-                    <button onClick={() => skip(1)} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors text-gray-400" title="+1s">
-                        <ChevronRight size={16} />
-                    </button>
-                    <button onClick={() => skip(5)} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors text-gray-400" title="+5s">
-                        <SkipForward size={16} />
-                    </button>
-                </div>
+                    />
+                </Tooltip>
+                <Tooltip content="1 sn ileri · →">
+                    <IconButton icon={ChevronRight} aria-label="1 saniye ileri" size="sm" onClick={() => skip(1)} />
+                </Tooltip>
+                <Tooltip content="5 sn ileri · L">
+                    <IconButton icon={SkipForward} aria-label="5 saniye ileri" size="sm" onClick={() => skip(5)} />
+                </Tooltip>
             </div>
         </div>
     );
-
 };
 
 /* ── Keyboard shortcut hints ── */
@@ -107,10 +94,10 @@ const SHORTCUTS = [
 ];
 
 export const ShortcutHints: React.FC = () => (
-    <div className="flex items-center justify-center gap-3 flex-wrap">
-        {SHORTCUTS.map(s => (
-            <span key={s.key} className="inline-flex items-center gap-1 text-[10px] text-gray-400">
-                <kbd className="px-1.5 py-0.5 bg-gray-100 border border-gray-200 rounded text-[10px] font-mono font-semibold text-gray-500">{s.key}</kbd>
+    <div className="flex items-center justify-center gap-x-3 gap-y-1.5 flex-wrap">
+        {SHORTCUTS.map((s) => (
+            <span key={s.key} className="inline-flex items-center gap-1 text-[11px] text-text-muted">
+                <Kbd>{s.key}</Kbd>
                 {s.label}
             </span>
         ))}
